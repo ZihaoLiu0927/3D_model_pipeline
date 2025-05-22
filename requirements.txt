@@ -16,4 +16,5 @@ mathutils
 bpy
 trimesh
 pillow
+celery[redis]
 

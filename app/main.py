@@ -53,20 +53,49 @@ async def process(file: UploadFile = File(...)):
     return {"task_id": task.id}
 
 
-@app.get("/result/{task_id}", summary="Check job status or download finished slice")
+@app.get(
+    "/result/{task_id}", summary="Check job status and get results when job finished"
+)
 def get_result(task_id: str):
-    """This function checks the status of the job and returns the finished slice."""
+    """This function checks job status and get results when job finished."""
     res: AsyncResult = AsyncResult(task_id, app=celery_app)
 
     if res.state == "SUCCESS":
-        path = Path(res.result["slice_path"])
-        if not path.exists():
-            raise HTTPException(410, "Result file expired or purged")
-        return FileResponse(
-            path, filename=path.name, media_type="application/octet-stream"
+        result_dict = res.result or {}
+        return JSONResponse(
+            {
+                "state": "SUCCESS",
+                "validate_log": result_dict.get("validate_log"),
+                "slicer_log": result_dict.get("slicer_log"),
+            }
         )
 
     if res.state in {"PENDING", "STARTED"}:
         return JSONResponse({"state": res.state, "progress": res.info or None})
 
     return JSONResponse({"state": res.state, "error": str(res.info)}, status_code=400)
+
+
+@app.get(
+    "/result/{task_id}/file",
+    summary="Download finished slice",
+    name="download_slice",
+)
+def download_slice(task_id: str):
+    """
+    仅当任务 state == SUCCESS 时允许下载切片文件；
+    否则返回 404 / 410。
+    """
+    res: AsyncResult = AsyncResult(task_id, app=celery_app)
+    if res.state != "SUCCESS":
+        raise HTTPException(404, "File not ready")
+
+    path = Path(res.result["slice_path"])
+    if not path.exists():
+        raise HTTPException(410, "Result file expired or purged")
+
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/octet-stream",
+    )
