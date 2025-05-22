@@ -76,6 +76,9 @@ def slice_model(
     output_dir.mkdir(parents=True, exist_ok=True)
     slicer_log = _run(
         [
+            "xvfb-run",
+            "--auto-servernum",
+            "--server-args=-screen 0 1280x720x24",
             BAMBUSTUDIO_BIN,
             "--slice",
             "0",
