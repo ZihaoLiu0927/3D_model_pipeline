@@ -47,6 +47,7 @@ def validate(model_path: pathlib.Path) -> str:
     """Headless Blender validation via user‑supplied script."""
     return _run([BLENDER_BIN, "-b", "-P", BLENDER_SCRIPT, "--", str(model_path)])
 
+
 def repair(src_path: pathlib.Path) -> pathlib.Path:
     """Clean geometry using trimesh + PyMeshLab, returns repaired OBJ."""
 
@@ -64,12 +65,13 @@ def repair(src_path: pathlib.Path) -> pathlib.Path:
     repaired_path = src_path.with_suffix(".repaired.stl")
     print("repair will save to " + str(repaired_path), flush=True)
     ms.save_current_mesh(str(repaired_path))
-    ms.save_current_mesh("/Users/zach/Desktop/test.stl")
     tmp_ply.unlink(missing_ok=True)
     return repaired_path
 
 
-def slice_model(model_path: pathlib.Path, output_dir: pathlib.Path) -> Tuple[pathlib.Path, str]:
+def slice_model(
+    model_path: pathlib.Path, output_dir: pathlib.Path
+) -> Tuple[pathlib.Path, str]:
     """Invoke Bambu Studio CLI and return the generated slice (G‑code/3MF)."""
     output_dir.mkdir(parents=True, exist_ok=True)
     slicer_log = _run(
@@ -89,7 +91,7 @@ def slice_model(model_path: pathlib.Path, output_dir: pathlib.Path) -> Tuple[pat
             str(model_path),
         ]
     )
-    
+
     print("slicer log: " + slicer_log, flush=True)
 
     produced = list(output_dir.iterdir())
@@ -105,6 +107,7 @@ def slice_model(model_path: pathlib.Path, output_dir: pathlib.Path) -> Tuple[pat
 # ---------------------------------------------------------------------------
 # High‑level orchestration
 # ---------------------------------------------------------------------------
+
 
 def process_model(src_file: str) -> dict[str, str]:
     """Whole pipeline: validate ➜ repair ➜ slice. Returns path to slice."""
@@ -123,5 +126,5 @@ def process_model(src_file: str) -> dict[str, str]:
     return {
         "slice_path": str(slice_path),
         "validate_log": validate_log,
-        "slicer_log":  slicer_log,
+        "slicer_log": slicer_log,
     }
