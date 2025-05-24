@@ -12,7 +12,7 @@ BLENDER_BIN: str = os.getenv(
     "BLENDER_BIN", "/Applications/Blender.app/Contents/MacOS/Blender"
 )
 BLENDER_SCRIPT: str = os.getenv("BLENDER_SCRIPT", "app/validate.py")
-BAMBUSTUDIO_BIN: str = os.getenv("BAMBUSTUDIO_BIN", "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio")
+PRUSASLICER_BIN: str = os.getenv("PRUSASLICER_BIN", "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer")
 
 MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
 SUPPORTED_EXTS: set[str] = {".obj", ".stl", ".glb", ".gltf", ".3mf"}

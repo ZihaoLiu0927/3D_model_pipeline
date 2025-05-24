@@ -12,7 +12,7 @@ from typing import List, Tuple
 import trimesh
 import pymeshlab as ml
 
-from .config import BLENDER_BIN, BLENDER_SCRIPT, BAMBUSTUDIO_BIN, SUPPORTED_EXTS
+from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
 
 logger = logging.getLogger(__name__)
 
@@ -76,20 +76,9 @@ def slice_model(
     output_dir.mkdir(parents=True, exist_ok=True)
     slicer_log = _run(
         [
-            "xvfb-run",
-            "--auto-servernum",
-            "--server-args=-screen 0 1280x720x24",
-            BAMBUSTUDIO_BIN,
-            "--slice",
-            "0",
-            "--orient",
-            "1",
-            "--arrange",
-            "1",
-            "--info",
-            "--allow-rotations",
-            "--ensure-on-bed",
-            "--outputdir",
+            PRUSASLICER_BIN,
+            "--gcode",
+            "--output",
             str(output_dir),
             str(model_path),
         ]

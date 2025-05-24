@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     # CLI 路径写成环境变量，代码里的 config.py 会读取
     BLENDER_BIN=/usr/local/bin/blender \
-    BAMBUSTUDIO_BIN=/usr/local/bin/bambustudio
+    PRUSASLICER_BIN=/opt/PrusaSlicer/AppRun
 
 ############################
 #  系统运行库 + 构建工具
@@ -29,11 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    wget \
-    tar \
-    fuse \
-    libgl1-mesa-glx \
-    libglu1-mesa \
     libfontconfig1 \
     libgtk-3-0 \
     libxkbcommon-x11-0 \
@@ -43,9 +38,8 @@ RUN apt-get update && \
     libxcb-keysyms1 \
     libpulse0 \
     libsqlite3-0 \
-    libopengl0 \
-    libwebkit2gtk-4.1-0 && \
-    rm -rf /var/lib/apt/lists/*
+    libwebkit2gtk-4.1-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PRUSASLICER_VERSION="2.8.1"
 ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
@@ -74,16 +68,17 @@ RUN curl -fSL \
 ############################
 #  安装 Bambu Studio CLI 
 ############################
-ENV BAMBU_APPIMAGE_URL=https://github.com/bambulab/BambuStudio/releases/download/V02.00.03.54/Bambu_Studio_linux_fedora-v02.00.03.54.AppImage
-ENV BAMBU_APPIMAGE_NAME=Bambu_Studio.AppImage
+ENV PRUSASLICER_VERSION="2.8.1"
+ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
+ENV PRUSASLICER_DOWNLOAD_URL="https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/${PRUSASLICER_FILENAME}"
 
-RUN wget -O /usr/local/bin/${BAMBU_APPIMAGE_NAME} ${BAMBU_APPIMAGE_URL} && \
-    chmod +x /usr/local/bin/${BAMBU_APPIMAGE_NAME} && \
-    /usr/local/bin/${BAMBU_APPIMAGE_NAME} --appimage-extract && \
-    mv squashfs-root /opt/BambuStudio 
-ENV PATH="/opt/BambuStudio/usr/bin:$PATH"
+RUN wget "${PRUSASLICER_DOWNLOAD_URL}" -O /tmp/PrusaSlicer.AppImage && \
+    chmod +x /tmp/PrusaSlicer.AppImage && \
+    /tmp/PrusaSlicer.AppImage --appimage-extract && \
+    mv squashfs-root /opt/PrusaSlicer && \
+    rm /tmp/PrusaSlicer.AppImage
 
-COPY test_files/ /app/test_data/
+ENV PATH="/opt/PrusaSlicer/usr/bin:$PATH"
 
 ############################
 #  Python 依赖
