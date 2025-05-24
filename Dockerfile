@@ -27,6 +27,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl wget git ca-certificates                      \
     && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    wget \
+    tar \
+    fuse \
+    libgl1-mesa-glx \
+    libglu1-mesa \
+    libfontconfig1 \
+    libgtk-3-0 \
+    libxkbcommon-x11-0 \
+    libxcb-randr0 \
+    libxcb-xinerama0 \
+    libxcb-shape0 \
+    libxcb-keysyms1 \
+    libpulse0 \
+    libsqlite3-0 \
+    libopengl0 \
+    libwebkit2gtk-4.1-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PRUSASLICER_VERSION="2.8.1"
+ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
+ENV PRUSASLICER_DOWNLOAD_URL="https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/${PRUSASLICER_FILENAME}"
+
+RUN wget "${PRUSASLICER_DOWNLOAD_URL}" -O /tmp/PrusaSlicer.AppImage && \
+    chmod +x /tmp/PrusaSlicer.AppImage && \
+    /tmp/PrusaSlicer.AppImage --appimage-extract && \
+    mv squashfs-root /opt/PrusaSlicer && \
+    rm /tmp/PrusaSlicer.AppImage
+
+ENV PATH="/opt/PrusaSlicer/usr/bin:$PATH"
+
 ############################
 #  安装 Blender (headless)
 ############################
@@ -42,15 +74,16 @@ RUN curl -fSL \
 ############################
 #  安装 Bambu Studio CLI 
 ############################
-# ARG BS_VERSION=V02.00.03.54
-# RUN wget -O source.tar.gz \
-#     https://github.com/bambulab/BambuStudio/archive/refs/tags/${BS_VERSION}.tar.gz \
-#     && tar -xzf source.tar.gz --strip-components=1 \
-#     && rm source.tar.gz
+ENV BAMBU_APPIMAGE_URL=https://github.com/bambulab/BambuStudio/releases/download/V02.00.03.54/Bambu_Studio_linux_fedora-v02.00.03.54.AppImage
+ENV BAMBU_APPIMAGE_NAME=Bambu_Studio.AppImage
 
-# RUN mkdir -p build && cd build \
-#     && cmake -DCMAKE_BUILD_TYPE=Release .. \
-#     && make -j$(nproc)
+RUN wget -O /usr/local/bin/${BAMBU_APPIMAGE_NAME} ${BAMBU_APPIMAGE_URL} && \
+    chmod +x /usr/local/bin/${BAMBU_APPIMAGE_NAME} && \
+    /usr/local/bin/${BAMBU_APPIMAGE_NAME} --appimage-extract && \
+    mv squashfs-root /opt/BambuStudio 
+ENV PATH="/opt/BambuStudio/usr/bin:$PATH"
+
+COPY test_files/ /app/test_data/
 
 ############################
 #  Python 依赖
