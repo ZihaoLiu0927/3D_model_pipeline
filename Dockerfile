@@ -66,7 +66,7 @@ RUN curl -fSL \
     && rm blender.tar.xz
 
 ############################
-#  安装 Bambu Studio CLI 
+#  安装 PrusaSplicer CLI 
 ############################
 ENV PRUSASLICER_VERSION="2.8.1"
 ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
