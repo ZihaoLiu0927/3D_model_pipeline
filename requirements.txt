@@ -17,4 +17,3 @@ bpy
 trimesh
 pillow
 celery[redis]
-shutil
