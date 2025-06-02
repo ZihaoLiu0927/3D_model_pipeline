@@ -7,6 +7,8 @@ import os
 from math import radians, pi
 import bpy
 import bmesh
+import json
+import time
 from mathutils import Vector
 
 
@@ -32,15 +34,30 @@ except KeyError:
     sys.stderr.write(f"❌ Unsupported file type: {ext}\n")
     sys.exit(1)
 
+start_time = time.time() # 导入计时
 result = info["op"](model_path)
+import_duration = time.time() - start_time  # 导入耗时计算
 
 if "FINISHED" not in result:
-    sys.stderr.write("❌ 导入失败，可能是文件损坏或插件缺失\n")
+    output = {
+        "import_status": "FAILED",
+        "import_duration_ms": round(import_duration * 1000, 2),
+        "validation_status": "FAILED",
+        "warnings": [
+            {"type": "IMPORT", "message": f"导入失败: {model_path}"}
+        ]
+    }
+    print(json.dumps(output, ensure_ascii=False))
     sys.exit(1)
 
-print("✅ Import success")
-objects = bpy.context.selected_objects
+output = {
+    "import_status": "SUCCESS",
+    "import_duration_ms": round(import_duration * 1000, 2),
+    "validation_status": "SUCCESS",
+    "warnings": [],
+}
 
+objects = bpy.context.selected_objects
 
 def is_manifold(obj):
     bm = bmesh.new()
@@ -117,9 +134,9 @@ def calculate_overhang_faces(obj, angle_limit=45):
 
     return overhang_count
 
-
 def validate(objects):
     issues = []
+    volume_sum = 0
     for obj in objects:
         bpy.context.view_layer.objects.active = obj
 
@@ -135,40 +152,40 @@ def validate(objects):
         bpy.ops.object.mode_set(mode="OBJECT")
         non_manifold_edges = [e for e in obj.data.edges if e.select]
         if non_manifold_edges:
-            issues.append(f"{obj.name} 存在非流形几何结构, {len(non_manifold_edges)}条")
+            issues.append(f"模型 {obj.name} 存在非流形几何结构, {len(non_manifold_edges)}条")
 
         # 材质检查
         if not obj.data.materials:
-            issues.append(f"{obj.name} 未指定材质")
+            issues.append(f"模型 {obj.name} 未指定材质")
 
         # UV检查
         if not obj.data.uv_layers:
-            issues.append(f"{obj.name} 缺少UV贴图")
+            issues.append(f"模型 {obj.name} 缺少UV贴图")
 
         # 尺寸检查
         dimensions = obj.dimensions
         if max(dimensions) > 10:
-            issues.append(f"{obj.name} 尺寸过大 ({dimensions})")
+            issues.append(f"模型 {obj.name} 尺寸过大 ({dimensions})")
 
         volume = get_volume(obj)
-        volume_msg = f"{obj.name} 的体积为 {volume:.4f} 立方单位"
+        volume_sum += volume
+        volume_msg = f"模型 {obj.name} 的体积为 {volume:.4f} 立方米(m^3)"
         if volume > 10:
             volume_msg += "，体积过大，建议缩小模型"
         issues.append(volume_msg)
 
         overhangs = calculate_overhang_faces(obj)
         if overhangs > 0:
-            issues.append(f"{obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构")
+            output["support_recommendation"] = f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构"
+            #issues.append(f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构")
 
+    output["model_volume_cubic_metre"] = round(volume_sum, 4)
     return issues
-
 
 issues_found = validate(objects)
 
-if issues_found:
-    print("模型存在以下合规问题：")
-    for issue in issues_found:
-        print(f" - {issue}")
+for issue in issues_found:
+    output["warnings"].append({"type": "VALIDATION", "message": issue})
 
-print("✅ 模型合规验证完成。")
+print(json.dumps(output, ensure_ascii=False))
 sys.exit(0)

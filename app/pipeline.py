@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from typing import List, Tuple
 import trimesh
+import json
 import pymeshlab as ml
 
 from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
@@ -43,9 +44,15 @@ def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def validate(model_path: pathlib.Path) -> str:
+def validate(model_path: pathlib.Path) -> dict:
     """Headless Blender validation via user‑supplied script."""
-    return _run([BLENDER_BIN, "-b", "-P", BLENDER_SCRIPT, "--", str(model_path)])
+    raw_output = _run([BLENDER_BIN, "-b", "-P", BLENDER_SCRIPT, "--", str(model_path)])
+    print("raw_output： ", raw_output)
+    try:
+        last_json_line = raw_output.strip().splitlines()[-1]  # 抽取最后一行
+        return json.loads(last_json_line)  # 返回结构化 JSON
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse Blender output: {e}")
 
 
 def repair(src_path: pathlib.Path) -> pathlib.Path:
@@ -63,7 +70,6 @@ def repair(src_path: pathlib.Path) -> pathlib.Path:
     ms.apply_filter("meshing_close_holes", maxholesize=1000)
 
     repaired_path = src_path.with_suffix(".repaired.stl")
-    print("repair will save to " + str(repaired_path), flush=True)
     ms.save_current_mesh(str(repaired_path))
     tmp_ply.unlink(missing_ok=True)
     return repaired_path
@@ -84,8 +90,6 @@ def slice_model(
         ]
     )
 
-    print("slicer log: " + slicer_log, flush=True)
-
     produced = list(output_dir.iterdir())
     if not produced:
         raise RuntimeError("Slicer produced no output files")
@@ -100,7 +104,6 @@ def slice_model(
 # High‑level orchestration
 # ---------------------------------------------------------------------------
 
-
 def process_model(src_file: str) -> dict[str, str]:
     """Whole pipeline: validate ➜ repair ➜ slice. Returns path to slice."""
     src_path = pathlib.Path(src_file)
@@ -109,14 +112,18 @@ def process_model(src_file: str) -> dict[str, str]:
         raise RuntimeError(f"Unsupported extension: {suffix}")
 
     work_root = src_path.parent
-    validate_log = validate(src_path)
-    print("validate log: " + validate_log, flush=True)
+    validate_report  = validate(src_path)
     repaired = repair(src_path)
-    print("input for slice: " + str(repaired), flush=True)
-    print("output for slice: " + str(work_root / "sliced"), flush=True)
     slice_path, slicer_log = slice_model(repaired, work_root / "sliced")
+
+    validate_report["slicing_status"] = "SUCCESS"
+    if "Low bed adhesion" in slicer_log: 
+        validate_report.setdefault("warnings", []).append({
+            "type": "SLICING",
+            "message": "Detected print stability issues: Low bed adhesion. Consider enabling supports and brim.",
+        })
+
     return {
         "slice_path": str(slice_path),
-        "validate_log": validate_log,
-        "slicer_log": slicer_log,
+        "validate_report": validate_report,
     }

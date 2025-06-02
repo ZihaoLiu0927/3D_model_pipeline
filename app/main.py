@@ -65,8 +65,7 @@ def get_result(task_id: str):
         return JSONResponse(
             {
                 "state": "SUCCESS",
-                "validate_log": result_dict.get("validate_log"),
-                "slicer_log": result_dict.get("slicer_log"),
+                **res.result["validate_report"]
             }
         )
 
