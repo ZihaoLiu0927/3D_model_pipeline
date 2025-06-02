@@ -9,19 +9,19 @@ import pathlib
 import subprocess
 import tempfile
 from typing import List, Tuple
-import trimesh
 import json
+import shutil
+import trimesh
 import pymeshlab as ml
 
 from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Low‑level helpers
 # ---------------------------------------------------------------------------
-
-
 def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
     """Run external command *cmd* and raise *RuntimeError* on failure."""
     logger.info("$ %s", " ".join(cmd))
@@ -42,12 +42,35 @@ def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Individual stages
 # ---------------------------------------------------------------------------
+def _convert_3mf_to_obj(src_3mf: pathlib.Path) -> pathlib.Path:
+    tmp_dir = pathlib.Path(tempfile.mkdtemp())
+    obj_path = tmp_dir / "converted.obj"
+
+    result = subprocess.run(
+        [
+            PRUSASLICER_BIN,
+            "--export-obj",  # ✅ 仅标志位
+            "--output",
+            str(obj_path),  # ✅ 指定输出路径
+            str(src_3mf),  # ✅ 最后才是输入 .3mf
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    if result.returncode != 0 or not obj_path.exists():
+        raise RuntimeError(f"3MF→OBJ conversion failed:\n{result.stdout}")
+
+    logger.info("Converted 3MF → OBJ: %s", obj_path)
+    return obj_path
 
 
 def validate(model_path: pathlib.Path) -> dict:
     """Headless Blender validation via user‑supplied script."""
     raw_output = _run([BLENDER_BIN, "-b", "-P", BLENDER_SCRIPT, "--", str(model_path)])
-    print("raw_output： ", raw_output)
+
     try:
         last_json_line = raw_output.strip().splitlines()[-1]  # 抽取最后一行
         return json.loads(last_json_line)  # 返回结构化 JSON
@@ -103,25 +126,40 @@ def slice_model(
 # ---------------------------------------------------------------------------
 # High‑level orchestration
 # ---------------------------------------------------------------------------
-
 def process_model(src_file: str) -> dict[str, str]:
     """Whole pipeline: validate ➜ repair ➜ slice. Returns path to slice."""
-    src_path = pathlib.Path(src_file)
-    suffix = src_path.suffix.lower()
+    orig_path = pathlib.Path(src_file)
+    suffix = orig_path.suffix.lower()
+
     if suffix not in SUPPORTED_EXTS:
         raise RuntimeError(f"Unsupported extension: {suffix}")
 
-    work_root = src_path.parent
-    validate_report  = validate(src_path)
+    job_root = orig_path.parent  # ✅ 永远指向上传目录
+    src_path = orig_path
+
+    # 若为 .3mf 先转换为 .obj
+    cleanup_dir: pathlib.Path | None = None
+    if suffix == ".3mf":
+        converted_obj = _convert_3mf_to_obj(src_path)
+        cleanup_dir = converted_obj.parent  # 用于事后删除
+        src_path = converted_obj
+        suffix = ".obj"
+
+    validate_report = validate(src_path)
     repaired = repair(src_path)
-    slice_path, slicer_log = slice_model(repaired, work_root / "sliced")
+    slice_path, slicer_log = slice_model(repaired, job_root / "sliced")
 
     validate_report["slicing_status"] = "SUCCESS"
-    if "Low bed adhesion" in slicer_log: 
-        validate_report.setdefault("warnings", []).append({
-            "type": "SLICING",
-            "message": "Detected print stability issues: Low bed adhesion. Consider enabling supports and brim.",
-        })
+    if "Low bed adhesion" in slicer_log:
+        validate_report.setdefault("warnings", []).append(
+            {
+                "type": "SLICING",
+                "message": "Detected print stability issues: Low bed adhesion. Consider enabling supports and brim.",
+            }
+        )
+
+    if cleanup_dir and cleanup_dir.exists():
+        shutil.rmtree(cleanup_dir, ignore_errors=True)
 
     return {
         "slice_path": str(slice_path),
