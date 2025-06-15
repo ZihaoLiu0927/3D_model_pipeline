@@ -34,7 +34,7 @@ except KeyError:
     sys.stderr.write(f"❌ Unsupported file type: {ext}\n")
     sys.exit(1)
 
-start_time = time.time() # 导入计时
+start_time = time.time()  # 导入计时
 result = info["op"](model_path)
 import_duration = time.time() - start_time  # 导入耗时计算
 
@@ -43,9 +43,7 @@ if "FINISHED" not in result:
         "import_status": "FAILED",
         "import_duration_ms": round(import_duration * 1000, 2),
         "validation_status": "FAILED",
-        "warnings": [
-            {"type": "IMPORT", "message": f"导入失败: {model_path}"}
-        ]
+        "warnings": [{"type": "IMPORT", "message": f"导入失败: {model_path}"}],
     }
     print(json.dumps(output, ensure_ascii=False))
     sys.exit(1)
@@ -58,6 +56,7 @@ output = {
 }
 
 objects = bpy.context.selected_objects
+
 
 def is_manifold(obj):
     bm = bmesh.new()
@@ -76,6 +75,15 @@ def get_volume(obj):
     volume = bm.calc_volume(signed=False)
     bm.free()
     return volume
+
+def get_surface_area(obj):
+    """计算对象的总表面积 (mm^2)"""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.transform(obj.matrix_world)
+    area = sum(f.calc_area() for f in bm.faces)
+    bm.free()
+    return area
 
 
 def calculate_overhang_faces(obj, angle_limit=45):
@@ -134,9 +142,12 @@ def calculate_overhang_faces(obj, angle_limit=45):
 
     return overhang_count
 
+
 def validate(objects):
     issues = []
     volume_sum = 0
+    dimensions_sum = [0, 0, 0]
+    surface_area_sum = 0  # 使用外部变量累计表面积
     for obj in objects:
         bpy.context.view_layer.objects.active = obj
 
@@ -152,7 +163,9 @@ def validate(objects):
         bpy.ops.object.mode_set(mode="OBJECT")
         non_manifold_edges = [e for e in obj.data.edges if e.select]
         if non_manifold_edges:
-            issues.append(f"模型 {obj.name} 存在非流形几何结构, {len(non_manifold_edges)}条")
+            issues.append(
+                f"模型 {obj.name} 存在非流形几何结构, {len(non_manifold_edges)}条"
+            )
 
         # 材质检查
         if not obj.data.materials:
@@ -164,23 +177,40 @@ def validate(objects):
 
         # 尺寸检查
         dimensions = obj.dimensions
+        dim_msg = f"模型 {obj.name} 的尺寸 (宽×深×高)：{dimensions.x:.2f}×{dimensions.y:.2f}×{dimensions.z:.2f} mm"
+        dimensions_sum = [
+            dimensions_sum[0] + round(dimensions.x, 2),
+            dimensions_sum[1] + round(dimensions.y, 2),
+            dimensions_sum[2] + round(dimensions.z, 2),
+        ]
         if max(dimensions) > 10:
-            issues.append(f"模型 {obj.name} 尺寸过大 ({dimensions})")
+            issues.append(f"模型 {obj.name} 尺寸过大 ({dim_msg})")
 
         volume = get_volume(obj)
         volume_sum += volume
-        volume_msg = f"模型 {obj.name} 的体积为 {volume:.4f} 立方米(m^3)"
+        volume_msg = f"模型 {obj.name} 的体积为 {volume:.4f} 立方毫米(mm^3)"
         if volume > 10:
             volume_msg += "，体积过大，建议缩小模型"
         issues.append(volume_msg)
 
         overhangs = calculate_overhang_faces(obj)
         if overhangs > 0:
-            output["support_recommendation"] = f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构"
-            #issues.append(f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构")
+            output["support_recommendation"] = (
+                f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构"
+            )
+            # issues.append(f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构")
+            
+        # 🔁 NEW: 表面积
+        area = get_surface_area(obj)
+        surface_area_sum += area
+        area_msg = f"模型 {obj.name} 的表面积为 {area:.4f} 平方毫米(mm^2)"
+        issues.append(area_msg)
 
-    output["model_volume_cubic_metre"] = round(volume_sum, 4)
+    output["model_volume_cubic_millimeter"] = round(volume_sum, 4)
+    output["model_dimensions_millimeter"] = dimensions_sum
+    output["model_surface_area_square_millimeter"] = round(surface_area_sum, 4)
     return issues
+
 
 issues_found = validate(objects)
 
