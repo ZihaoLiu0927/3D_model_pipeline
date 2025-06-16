@@ -162,7 +162,7 @@ def process_model(src_file: str) -> dict[str, str]:
     # 若为 .3mf 先转换为 .obj
     cleanup_dir: pathlib.Path | None = None
     if suffix == ".3mf":
-        converted_obj = _convert_to_format(src_path, ".obj")
+        converted_obj = _convert_to_format(src_path, "obj")
         cleanup_dir = converted_obj.parent  # 用于事后删除
         src_path = converted_obj
         suffix = ".obj"
