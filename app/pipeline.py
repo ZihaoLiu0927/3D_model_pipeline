@@ -13,6 +13,7 @@ import json
 import shutil
 import trimesh
 import pymeshlab as ml
+from typing import Literal
 
 from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
 
@@ -42,14 +43,14 @@ def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Individual stages
 # ---------------------------------------------------------------------------
-def _convert_3mf_to_obj(src_3mf: pathlib.Path) -> pathlib.Path:
+def _convert_to_format(src_3mf: pathlib.Path, target_format: str) -> pathlib.Path:
     tmp_dir = pathlib.Path(tempfile.mkdtemp())
-    obj_path = tmp_dir / "converted.obj"
+    obj_path = tmp_dir / ("converted." + target_format)
 
     result = subprocess.run(
         [
             PRUSASLICER_BIN,
-            "--export-obj",  # ✅ 仅标志位
+            ("--export-" + target_format),  # ✅ 仅标志位
             "--output",
             str(obj_path),  # ✅ 指定输出路径
             str(src_3mf),  # ✅ 最后才是输入 .3mf
@@ -66,6 +67,27 @@ def _convert_3mf_to_obj(src_3mf: pathlib.Path) -> pathlib.Path:
     logger.info("Converted 3MF → OBJ: %s", obj_path)
     return obj_path
 
+
+# 🔁 NEW: 通用转换入口
+def convert_model(src_path: pathlib.Path,
+                  target_ext: Literal[".stl", ".obj", ".3mf"]) -> pathlib.Path:
+    src_ext = src_path.suffix.lower()
+    if src_ext == target_ext:
+        return str(src_path)          # 不转换
+
+    # 1) to 3mf
+    if target_ext == ".3mf":
+        return _convert_to_format(src_path, "3mf")
+
+    # 2) to stl
+    if target_ext == ".stl":
+        return _convert_to_format(src_path, "stl")
+    
+    # 3) to obj
+    if target_ext == ".obj":
+        return _convert_to_format(src_path, "obj")
+
+    raise RuntimeError(f"Unsupported conversion: {src_ext} → {target_ext}")
 
 def validate(model_path: pathlib.Path) -> dict:
     """Headless Blender validation via user‑supplied script."""
@@ -140,7 +162,7 @@ def process_model(src_file: str) -> dict[str, str]:
     # 若为 .3mf 先转换为 .obj
     cleanup_dir: pathlib.Path | None = None
     if suffix == ".3mf":
-        converted_obj = _convert_3mf_to_obj(src_path)
+        converted_obj = _convert_to_format(src_path, ".obj")
         cleanup_dir = converted_obj.parent  # 用于事后删除
         src_path = converted_obj
         suffix = ".obj"

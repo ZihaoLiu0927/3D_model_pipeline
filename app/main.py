@@ -13,8 +13,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from celery.result import AsyncResult
 
-from .config import MAX_FILE_SIZE_MB, SUPPORTED_EXTS, UPLOAD_ROOT
-from .tasks import run_pipeline_task, celery_app
+from .config import MAX_FILE_SIZE_MB, SUPPORTED_EXTS, SUPPORTED_EXTS_CONVERT, UPLOAD_ROOT
+from .tasks import run_pipeline_task, convert_model_task, celery_app
 
 app = FastAPI(title="3D-Model Compliance & Slicing API", version="2.2-celery-mod")
 
@@ -61,13 +61,22 @@ def get_result(task_id: str):
     res: AsyncResult = AsyncResult(task_id, app=celery_app)
 
     if res.state == "SUCCESS":
-        result_dict = res.result or {}
-        return JSONResponse(
-            {
-                "state": "SUCCESS",
-                **res.result["validate_report"]
-            }
-        )
+        payload = res.result or {}
+        if "validate_report" in payload:
+            # slicing / validate 流
+            return JSONResponse({"state": "SUCCESS", **payload["validate_report"]})
+        elif "converted_path" in payload:
+            path = Path(payload["converted_path"])
+            if not path.exists():
+                raise HTTPException(410, "File expired")
+            return FileResponse(                             # ← NEW
+                path,
+                filename=path.name,
+                media_type="application/octet-stream",
+            )
+        else:
+            # 兜底：直接返回完整结果
+            return JSONResponse({"state": "SUCCESS", "result": payload})
 
     if res.state in {"PENDING", "STARTED"}:
         return JSONResponse({"state": res.state, "progress": res.info or None})
@@ -98,3 +107,34 @@ def download_slice(task_id: str):
         filename=path.name,
         media_type="application/octet-stream",
     )
+    
+@app.post("/convert", summary="Convert 3D model to another format")
+async def convert(
+    target_format: str,
+    file: UploadFile = File(...),
+):
+    """
+    上传模型并转换成目标格式。
+    参数 `target_format` 必须是 stl | obj | 3mf（不区分大小写）。
+    """
+    target_ext = f".{target_format.lower()}"
+    if target_ext not in {".stl", ".obj", ".3mf"}:
+        raise HTTPException(400, "target_format must be stl, obj or 3mf")
+
+    # 大小/扩展名校验同 /process 端点
+    if file.size and file.size > MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, "File too large")
+
+    src_suffix = Path(file.filename or "model").suffix.lower()
+    if src_suffix not in SUPPORTED_EXTS_CONVERT:
+        raise HTTPException(400, "Unsupported source extension")
+
+    # 保存上传
+    work_dir = UPLOAD_ROOT / f"convert_{uuid.uuid4().hex}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = work_dir / f"input{src_suffix}"
+    await asyncio.to_thread(_save_upload, file, raw_path)
+
+    # 入队
+    task = convert_model_task.delay(str(raw_path), target_ext)
+    return {"task_id": task.id}
