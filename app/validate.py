@@ -85,6 +85,12 @@ def get_surface_area(obj):
     bm.free()
     return area
 
+def get_world_dimensions(obj: bpy.types.Object) -> Vector:
+    """🔁 NEW: 旋转/缩放无偏差的世界坐标尺寸"""
+    world_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    min_corner = Vector((min(v[i] for v in world_corners) for i in range(3)))
+    max_corner = Vector((max(v[i] for v in world_corners) for i in range(3)))
+    return max_corner - min_corner
 
 def calculate_overhang_faces(obj, angle_limit=45):
     """
@@ -146,7 +152,7 @@ def calculate_overhang_faces(obj, angle_limit=45):
 def validate(objects):
     issues = []
     volume_sum = 0
-    dimensions_sum = [0, 0, 0]
+    dims_max = Vector((0, 0, 0))
     surface_area_sum = 0  # 使用外部变量累计表面积
     for obj in objects:
         bpy.context.view_layer.objects.active = obj
@@ -175,16 +181,14 @@ def validate(objects):
         if not obj.data.uv_layers:
             issues.append(f"模型 {obj.name} 缺少UV贴图")
 
-        # 尺寸检查
-        dimensions = obj.dimensions
-        dim_msg = f"模型 {obj.name} 的尺寸 (宽×深×高)：{dimensions.x:.2f}×{dimensions.y:.2f}×{dimensions.z:.2f} mm"
-        dimensions_sum = [
-            dimensions_sum[0] + round(dimensions.x, 2),
-            dimensions_sum[1] + round(dimensions.y, 2),
-            dimensions_sum[2] + round(dimensions.z, 2),
-        ]
-        if max(dimensions) > 10:
-            issues.append(f"模型 {obj.name} 尺寸过大 ({dim_msg})")
+        # 尺寸（世界坐标）
+        dims = get_world_dimensions(obj)
+        dims_max = Vector((max(dims_max[i], dims[i]) for i in range(3)))
+        dim_msg = f"模型 {obj.name} 尺寸：{dims.x:.2f}×{dims.y:.2f}×{dims.z:.2f} mm"
+        if max(dims) > 300:  # 阈值可调
+            issues.append(dim_msg + "，尺寸过大")
+        else:
+            issues.append(dim_msg)
 
         volume = get_volume(obj)
         volume_sum += volume
@@ -207,7 +211,7 @@ def validate(objects):
         issues.append(area_msg)
 
     output["model_volume_cubic_millimeter"] = round(volume_sum, 4)
-    output["model_dimensions_millimeter"] = dimensions_sum
+    output["model_dimensions_millimeter"] = [round(dims_max.x,2), round(dims_max.y,2), round(dims_max.z,2)],
     output["model_surface_area_square_millimeter"] = round(surface_area_sum, 4)
     return issues
 
