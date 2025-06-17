@@ -66,16 +66,8 @@ def get_result(task_id: str):
             # slicing / validate 流
             return JSONResponse({"state": "SUCCESS", **payload["validate_report"]})
         elif "converted_path" in payload:
-            path = Path(payload["converted_path"])
-            if not path.exists():
-                raise HTTPException(410, "File expired")
-            return FileResponse(                             # ← NEW
-                path,
-                filename=path.name,
-                media_type="application/octet-stream",
-            )
+            return JSONResponse({"state": "SUCCESS"})
         else:
-            # 兜底：直接返回完整结果
             return JSONResponse({"state": "SUCCESS", "result": payload})
 
     if res.state in {"PENDING", "STARTED"}:
@@ -97,11 +89,19 @@ def download_slice(task_id: str):
     res: AsyncResult = AsyncResult(task_id, app=celery_app)
     if res.state != "SUCCESS":
         raise HTTPException(404, "File not ready")
-
-    path = Path(res.result["slice_path"])
-    if not path.exists():
+    
+    payload = res.result or {}
+    if "validate_report" in payload:
+        path = Path(payload["slice_path"])
+        if not path.exists():
+            raise HTTPException(410, "Result file expired or purged")
+    elif "converted_path" in payload:
+        path = Path(payload["converted_path"])
+        if not path.exists():
+            raise HTTPException(410, "Result file expired or purged")
+    else:
         raise HTTPException(410, "Result file expired or purged")
-
+    
     return FileResponse(
         path,
         filename=path.name,
@@ -125,14 +125,14 @@ async def convert(
     if file.size and file.size > MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(413, "File too large")
 
-    src_suffix = Path(file.filename or "model").suffix.lower()
-    if src_suffix not in SUPPORTED_EXTS_CONVERT:
+    suffix = Path(file.filename or "model").suffix.lower()
+    if suffix not in SUPPORTED_EXTS_CONVERT:
         raise HTTPException(400, "Unsupported source extension")
 
     # 保存上传
-    work_dir = UPLOAD_ROOT / f"convert_{uuid.uuid4().hex}"
+    work_dir = UPLOAD_ROOT / f"job_{uuid.uuid4().hex}"
     work_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = work_dir / f"input{src_suffix}"
+    raw_path = work_dir / f"input{suffix}"
     await asyncio.to_thread(_save_upload, file, raw_path)
 
     # 入队

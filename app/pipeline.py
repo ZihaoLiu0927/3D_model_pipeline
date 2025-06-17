@@ -43,9 +43,9 @@ def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Individual stages
 # ---------------------------------------------------------------------------
-def _convert_to_format(src_3mf: pathlib.Path, target_format: str) -> pathlib.Path:
-    tmp_dir = pathlib.Path(tempfile.mkdtemp())
-    obj_path = tmp_dir / ("converted." + target_format)
+def _convert_to_format(src: pathlib.Path, target_format: str, output_dir: pathlib.Path) -> pathlib.Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    obj_path = output_dir / ("converted." + target_format)
 
     result = subprocess.run(
         [
@@ -53,7 +53,7 @@ def _convert_to_format(src_3mf: pathlib.Path, target_format: str) -> pathlib.Pat
             ("--export-" + target_format),  # ✅ 仅标志位
             "--output",
             str(obj_path),  # ✅ 指定输出路径
-            str(src_3mf),  # ✅ 最后才是输入 .3mf
+            str(src),  # ✅ 最后才是输入 .3mf
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -72,20 +72,22 @@ def _convert_to_format(src_3mf: pathlib.Path, target_format: str) -> pathlib.Pat
 def convert_model(src_path: pathlib.Path,
                   target_ext: Literal[".stl", ".obj", ".3mf"]) -> pathlib.Path:
     src_ext = src_path.suffix.lower()
+    job_root = src_path.parent  # ✅ 指向上传目录 /tmp/job_{hash}
+    
     if src_ext == target_ext:
         return str(src_path)          # 不转换
 
     # 1) to 3mf
     if target_ext == ".3mf":
-        return _convert_to_format(src_path, "3mf")
+        return _convert_to_format(src_path, "3mf", job_root / "converted")
 
     # 2) to stl
     if target_ext == ".stl":
-        return _convert_to_format(src_path, "stl")
+        return _convert_to_format(src_path, "stl", job_root / "converted")
     
     # 3) to obj
     if target_ext == ".obj":
-        return _convert_to_format(src_path, "obj")
+        return _convert_to_format(src_path, "obj", job_root / "converted")
 
     raise RuntimeError(f"Unsupported conversion: {src_ext} → {target_ext}")
 
@@ -156,13 +158,13 @@ def process_model(src_file: str) -> dict[str, str]:
     if suffix not in SUPPORTED_EXTS:
         raise RuntimeError(f"Unsupported extension: {suffix}")
 
-    job_root = orig_path.parent  # ✅ 永远指向上传目录
-    src_path = orig_path
+    job_root = orig_path.parent  # ✅ 指向上传目录 /tmp/job_{hash}
+    src_path = orig_path # /tmp/job_{hash}/file.ext
 
     # 若为 .3mf 先转换为 .obj
     cleanup_dir: pathlib.Path | None = None
     if suffix == ".3mf":
-        converted_obj = _convert_to_format(src_path, "stl")
+        converted_obj = _convert_to_format(src_path, "stl", job_root / "converted")
         cleanup_dir = converted_obj.parent  # 用于事后删除
         src_path = converted_obj
         suffix = ".obj"
