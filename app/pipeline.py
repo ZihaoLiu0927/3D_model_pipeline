@@ -79,15 +79,18 @@ def convert_model(src_path: pathlib.Path,
 
     # 1) to 3mf
     if target_ext == ".3mf":
-        return _convert_to_format(src_path, "3mf", job_root / "converted")
+        res = _convert_to_format(src_path, "3mf", job_root / "converted")
+        return {"converted_path": str(res)}
 
     # 2) to stl
     if target_ext == ".stl":
-        return _convert_to_format(src_path, "stl", job_root / "converted")
+        res = _convert_to_format(src_path, "stl", job_root / "converted")
+        return {"converted_path": str(res)}
     
     # 3) to obj
     if target_ext == ".obj":
-        return _convert_to_format(src_path, "obj", job_root / "converted")
+        res = _convert_to_format(src_path, "obj", job_root / "converted")
+        return {"converted_path": str(res)}
 
     raise RuntimeError(f"Unsupported conversion: {src_ext} → {target_ext}")
 

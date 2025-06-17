@@ -194,7 +194,7 @@ def validate(objects):
         volume_sum += volume
         volume_msg = f"模型 {obj.name} 的体积为 {volume:.4f} 立方毫米(mm^3)"
         if volume > 10:
-            volume_msg += "，体积过大，建议缩小模型"
+            volume_msg += ",体积过大, 建议缩小模型"
         issues.append(volume_msg)
 
         overhangs = calculate_overhang_faces(obj)

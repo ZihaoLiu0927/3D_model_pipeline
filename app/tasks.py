@@ -23,7 +23,10 @@ celery_app.conf.update(task_track_started=True, acks_late=True)
 @celery_app.task(bind=True, max_retries=3, soft_time_limit=3600, time_limit=3900)
 def run_pipeline_task(self, src_file: str) -> dict[str, str]:
     """Validate → repair → slice. Returns absolute path to slice file."""
-    return process_model(src_file)
+    try:
+        return process_model(src_file)
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=5, max_retries=2)
 
 @celery_app.task(bind=True, max_retries=3, soft_time_limit=900, time_limit=1200)
 def convert_model_task(self, src_file: str, target_ext: str) -> str:
@@ -32,7 +35,6 @@ def convert_model_task(self, src_file: str, target_ext: str) -> str:
     Returns absolute path of converted file.
     """
     try:
-        res = convert_model(Path(src_file), target_ext)
-        return {"converted_path": str(res)}
+        return convert_model(Path(src_file), target_ext)
     except Exception as exc:
         raise self.retry(exc=exc, countdown=5, max_retries=2)
