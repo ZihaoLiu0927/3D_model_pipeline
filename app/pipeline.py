@@ -153,8 +153,10 @@ def slice_model(
 # ---------------------------------------------------------------------------
 # High‑level orchestration
 # ---------------------------------------------------------------------------
+from .metrics import StageTimer
 def process_model(src_file: str) -> dict[str, str]:
     """Whole pipeline: validate ➜ repair ➜ slice. Returns path to slice."""
+    timer = StageTimer()
     orig_path = pathlib.Path(src_file)
     suffix = orig_path.suffix.lower()
 
@@ -163,6 +165,8 @@ def process_model(src_file: str) -> dict[str, str]:
 
     job_root = orig_path.parent  # ✅ 指向上传目录 /tmp/job_{hash}
     src_path = orig_path # /tmp/job_{hash}/file.ext
+
+    timer.mark("start convert format and validate")
 
     # 若为 .3mf 先转换为 .obj
     cleanup_dir: pathlib.Path | None = None
@@ -173,8 +177,13 @@ def process_model(src_file: str) -> dict[str, str]:
         suffix = ".obj"
 
     validate_report = validate(src_path)
+    timer.mark("validate done")
+
     repaired = repair(src_path)
+    timer.mark("repair done")
+
     slice_path, slicer_log = slice_model(repaired, job_root / "sliced")
+    timer.mark("slice done")
 
     validate_report["slicing_status"] = "SUCCESS"
     if "Low bed adhesion" in slicer_log:
@@ -187,6 +196,9 @@ def process_model(src_file: str) -> dict[str, str]:
 
     if cleanup_dir and cleanup_dir.exists():
         shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+    metrics = timer.snapshot()
+    print(metrics)
 
     return {
         "slice_path": str(slice_path),
