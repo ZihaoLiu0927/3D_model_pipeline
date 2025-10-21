@@ -175,11 +175,11 @@ def validate(objects):
 
         # 材质检查
         if not obj.data.materials:
-            issues.append(f"模型 {obj.name} 未指定材质")
+            issues.append("模型未指定材质")
 
         # UV检查
         if not obj.data.uv_layers:
-            issues.append(f"模型 {obj.name} 缺少UV贴图")
+            issues.append("模型缺少UV贴图")
 
         # 尺寸（世界坐标）
         dims = get_world_dimensions(obj)
@@ -192,7 +192,7 @@ def validate(objects):
 
         volume = get_volume(obj)
         volume_sum += volume
-        volume_msg = f"模型 {obj.name} 的体积为 {volume:.4f} 立方毫米(mm^3)"
+        volume_msg = f"模型的体积为 {volume:.4f} 立方毫米(mm^3)"
         if volume > 10:
             volume_msg += ",体积过大, 建议缩小模型"
         issues.append(volume_msg)
@@ -200,14 +200,14 @@ def validate(objects):
         overhangs = calculate_overhang_faces(obj)
         if overhangs > 0:
             output["support_recommendation"] = (
-                f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构"
+                f"模型有 {overhangs} 个悬挑面，建议添加打印支撑结构"
             )
-            # issues.append(f"模型 {obj.name} 有 {overhangs} 个悬挑面，建议添加打印支撑结构")
+            # issues.append(f"模型有 {overhangs} 个悬挑面，建议添加打印支撑结构")
             
         # 🔁 NEW: 表面积
         area = get_surface_area(obj)
         surface_area_sum += area
-        area_msg = f"模型 {obj.name} 的表面积为 {area:.4f} 平方毫米(mm^2)"
+        area_msg = f"模型的表面积为 {area:.4f} 平方毫米(mm^2)"
         issues.append(area_msg)
 
     output["model_volume_cubic_millimeter"] = round(volume_sum, 4)

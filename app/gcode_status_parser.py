@@ -253,7 +253,7 @@ def process_gcode_file(path: str) -> Dict[str, Any]:
     out = {
         "filament_diameter": header_state["filament_diameter"] or [1.75],
         "filament_density": header_state["filament_density"] or [1.24],
-        "header_raw": header_state["raw_meta"],
+        # "header_raw": header_state["raw_meta"],
         "extruders": report,
         "slicer_footer": footer,
     }
@@ -271,12 +271,16 @@ def main():
             print(f"File not found: {p}", file=sys.stderr)
             sys.exit(1)
 
-    if len(paths) == 1:
-        result = process_gcode_file(paths[0])
-    else:
-        result = {p: process_gcode_file(p) for p in paths}
+    try:
+        if len(paths) == 1:
+            result = process_gcode_file(paths[0])
+        else:
+            result = {p: process_gcode_file(p) for p in paths}
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps({"file": p, "ok": False, "error": str(e)}, ensure_ascii=False))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
