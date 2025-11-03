@@ -20,6 +20,7 @@ services:
       - "8000:8000"
     volumes:
       - shared_uploads_volume:/shared_uploads # Mount the shared volume
+      - ./app/my_config.ini:/app/my_config.ini
     command: > # This will be passed as arguments to the ENTRYPOINT script
       uvicorn app.main:app
       --host 0.0.0.0
