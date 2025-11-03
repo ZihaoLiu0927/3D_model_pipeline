@@ -3,32 +3,165 @@
 from __future__ import annotations
 
 import os
+import shutil, logging
 from pathlib import Path
+from typing import Tuple
 from celery import Celery
+from kombu import Queue
 
 from .config import BROKER_URL, RESULT_BACKEND
-from .pipeline import process_model, convert_model
+from .pipeline import (
+    validate, repair, slice_model, _convert_to_format, convert_model
+)
+from .gcode_status_parser import process_gcode_file as parse_gcode_status 
+# 一些稳定性环境变量（也可在 docker-compose 里设）
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("APPIMAGE_EXTRACT_AND_RUN", "1")
 os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 # ---------------------------------------------------------------------------
 # Celery application
 # ---------------------------------------------------------------------------
 
 celery_app = Celery("pipeline", broker=BROKER_URL, backend=RESULT_BACKEND)
-celery_app.conf.update(task_track_started=True, acks_late=True)
+celery_app.conf.update(
+    task_track_started=True,
+    acks_late=True,
+
+    # ✅ 把默认队列从 Celery 的 "celery" 改为你自己的 "default"
+    task_default_queue="default",
+
+    # ✅ 明确声明两个队列，并给各自 routing_key（与 Redis 不是强绑定，但可读性&可移植性更好）
+    task_queues=(
+        Queue("default", routing_key="default"),
+        Queue("slice",   routing_key="slice"),
+    ),
+
+    # ✅ 路由规则：只把 slice_task 丢到 slice 队列；其他任务走 default
+    task_routes={
+        "app.tasks.slice_task": {"queue": "slice", "routing_key": "slice"},
+        # 可选：显式指定 run_pipeline_task / convert_model_task 走 default
+        "app.tasks.run_pipeline_task": {"queue": "default", "routing_key": "default"},
+        "app.tasks.convert_model_task": {"queue": "default", "routing_key": "default"},
+    },
+
+    # 可选：Redis 可见性超时，防止 worker 崩溃后消息永久丢失
+    broker_transport_options={"visibility_timeout": 3600},
+)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Celery task wrapper
 # ---------------------------------------------------------------------------
+# --- 专用切片任务：绑定到 "slice" 队列，返回 (gcode_path, slicer_log) ---------------
+@celery_app.task(name="app.tasks.slice_task", queue="slice", bind=True)
+def slice_task(self, model_path: str, output_dir: str) -> Tuple[str, str]:
+    from .pipeline import slice_model
+    out_path, log = slice_model(Path(model_path), Path(output_dir))
+    return str(out_path), log
 
-@celery_app.task(bind=True, max_retries=3, soft_time_limit=3600, time_limit=3900)
-def run_pipeline_task(self, src_file: str) -> dict[str, str]:
-    """Validate → repair → slice. Returns absolute path to slice file."""
+# --- 切片完成后的收尾任务：拼装 validate_report、解析 gcode、清理等 -------------------
+@celery_app.task(name="app.tasks.finalize_after_slice", bind=True)
+def finalize_after_slice(self, slice_result: Tuple[str, str], context: dict) -> dict:
+    """
+    slice_result: (out_path_str, slicer_log)
+    context: {
+      "validate_report": dict,
+      "cleanup_dir": str | None,
+      "original_path": str,
+      "skipped_repair": bool
+    }
+    """
+    out_path_str, slicer_log = slice_result
+    validate_report = context.get("validate_report", {}) or {}
+    cleanup_dir = context.get("cleanup_dir")
+    # 写入切片日志/告警
+    validate_report["slicing_status"] = "SUCCESS"
+    if "Low bed adhesion" in (slicer_log or ""):
+        validate_report.setdefault("warnings", []).append({
+            "type": "SLICING",
+            "message": "Detected print stability issues: Low bed adhesion. Consider enabling supports and brim.",
+        })
+
+    # 解析 G-code 状态
+    gcode_status = None
     try:
-        return process_model(src_file)
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=5, max_retries=2)
+        from .gcode_status_parser import process_gcode_file as parse_gcode_status
+        gcode_status = parse_gcode_status(out_path_str)
+    except Exception as e:
+        logger.exception("G-code status parse failed: %s", e)
+        gcode_status = {"ok": False, "error": str(e)}
 
-@celery_app.task(bind=True, max_retries=3, soft_time_limit=900, time_limit=1200)
+    validate_report["slice_report"] = gcode_status
+
+    # 清理临时转换目录
+    if cleanup_dir:
+        try:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+        except Exception:
+            logger.exception("cleanup failed for %s", cleanup_dir)
+
+    return {
+        "slice_path": out_path_str,
+        "validate_report": validate_report,
+    }
+
+# --- 顶层流水线任务：不再等待子任务，交棒给 chain -----------------------------------
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=3600, time_limit=3900,
+                 name="app.tasks.run_pipeline_task")
+def run_pipeline_task(self, src_file: str) -> dict:
+    """
+    顶层编排：convert(.3mf→obj) → validate → (可选) repair → 交给 slice_task(queue='slice') → finalize_after_slice
+    这里不再同步等待切片结果，而是用 self.replace(slice_sig | finalize_sig)。
+    """
+    from .pipeline import StageTimer
+    timer = StageTimer()
+
+    src_path = Path(src_file)
+    suffix = src_path.suffix.lower()
+    if suffix not in {".stl", ".obj", ".3mf"}:
+        raise self.retry(exc=RuntimeError(f"Unsupported extension: {suffix}"), countdown=5)
+
+    job_root = src_path.parent
+    original_path = src_path
+    original_suffix = suffix
+
+    # 若为 .3mf 先转 obj（或你原来的策略）
+    cleanup_dir = None
+    if suffix == ".3mf":
+        converted_obj = _convert_to_format(src_path, "obj", job_root / "converted")
+        cleanup_dir = converted_obj.parent
+        src_path = converted_obj
+
+    # validate
+    validate_report = validate(src_path)
+
+    # repair：按你原逻辑，.3mf 跳过
+    skipped_repair = False
+    if original_suffix != ".3mf":
+        repaired = repair(src_path)
+    else:
+        repaired = original_path
+        skipped_repair = True
+
+    # 交由 slice 专用队列（串行化）
+    target_dir = job_root / "sliced"
+    slice_sig = slice_task.s(str(repaired), str(target_dir)).set(queue="slice")
+
+    # 把必要上下文传给 finalize
+    context = {
+        "validate_report": validate_report,
+        "cleanup_dir": str(cleanup_dir) if cleanup_dir else None,
+        "original_path": str(original_path),
+        "skipped_repair": skipped_repair,
+    }
+    finalize_sig = finalize_after_slice.s(context)
+
+    # 交棒：父任务被替换为 chain 的最后结果（对外 task_id 不变）
+    raise self.replace(slice_sig | finalize_sig)
+
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=900, time_limit=1200, name="app.tasks.convert_model_task")
 def convert_model_task(self, src_file: str, target_ext: str) -> str:
     """
     Convert model to target_ext ('.stl' | '.obj' | '.3mf').
@@ -38,3 +171,5 @@ def convert_model_task(self, src_file: str, target_ext: str) -> str:
         return convert_model(Path(src_file), target_ext)
     except Exception as exc:
         raise self.retry(exc=exc, countdown=5, max_retries=2)
+
+

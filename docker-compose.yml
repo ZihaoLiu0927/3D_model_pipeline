@@ -26,23 +26,36 @@ services:
       --host 0.0.0.0
       --port 8000
 
-  celery-worker:
+  worker-default:
     build: .
-    container_name: pipeline-worker
-    depends_on:
-    - redis
+    container_name: pipeline-worker-default
+    depends_on: [redis]
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - UPLOAD_ROOT=/shared_uploads # Set UPLOAD_ROOT to the shared volume path
     volumes:
-      - shared_uploads_volume:/shared_uploads # Mount the shared volume
-    command: > # This will be passed as arguments to the ENTRYPOINT script
-      celery
-      -A app.tasks:celery_app
-      worker
-      -P threads
-      -c 8
+      - shared_uploads_volume:/shared_uploads
+    command: >
+      celery -A app.tasks:celery_app worker
+      --pool=prefork
+      --concurrency=2
+      -Q default
+      -l info
+
+  worker-slicer:
+    build: .
+    container_name: pipeline-worker-slicer
+    depends_on: [redis]
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - shared_uploads_volume:/shared_uploads
+    command: >
+      celery -A app.tasks:celery_app worker
+      --pool=prefork
+      --concurrency=1
+      -Q slice
       -l info
 
 volumes:

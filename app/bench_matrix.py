@@ -3,7 +3,7 @@ import concurrent.futures as cf, time, requests, os, json, statistics as st
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8000"
-MODELS = [r"G:\downloads\Lidded-Ewer.obj", r"G:\downloads\Dragon.3mf"]
+MODELS = [r"G:\downloads\Dragon.3mf"]
 
 def run_one(path):
     t0 = time.perf_counter()

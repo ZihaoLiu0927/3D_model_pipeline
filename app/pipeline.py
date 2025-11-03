@@ -17,6 +17,9 @@ import sys
 from typing import Literal
 
 from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
+from typing import Callable, Tuple
+SliceFn = Callable[[pathlib.Path, pathlib.Path], Tuple[pathlib.Path, str]]
+
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +202,7 @@ def _resolve_profile(fname: str) -> pathlib.Path | None:
 from .metrics import StageTimer
 
 
-def process_model(src_file: str) -> dict[str, str]:
+def process_model(src_file: str, slice_fn: SliceFn | None = None) -> dict[str, str]:
     """Whole pipeline: validate ➜ repair ➜ slice. Returns path to slice."""
     timer = StageTimer()
     orig_path = pathlib.Path(src_file)
@@ -232,8 +235,12 @@ def process_model(src_file: str) -> dict[str, str]:
     else:
         # skip fix for .3mf file for now
         repaired = original_path
-
-    slice_path, slicer_log = slice_model(repaired, job_root / "sliced")
+    
+    target_dir = job_root / "sliced"
+    if slice_fn is None:
+        slice_path, slicer_log = slice_model(repaired, target_dir)
+    else:
+        slice_path, slicer_log = slice_fn(repaired, target_dir)
     timer.mark("slice done")
 
     validate_report["slicing_status"] = "SUCCESS"
