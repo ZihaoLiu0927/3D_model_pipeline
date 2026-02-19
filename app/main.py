@@ -118,8 +118,8 @@ async def convert(
     参数 `target_format` 必须是 stl | obj | 3mf（不区分大小写）。
     """
     target_ext = f".{target_format.lower()}"
-    if target_ext not in {".stl", ".obj", ".3mf"}:
-        raise HTTPException(400, "target_format must be stl, obj or 3mf")
+    if target_ext not in {".stl", ".obj", ".3mf", ".glb"}:
+        raise HTTPException(400, "target_format must be stl, obj, 3mf or glb")
 
     # 大小/扩展名校验同 /process 端点
     if file.size and file.size > MAX_FILE_SIZE_MB * 1024 * 1024:

@@ -80,9 +80,23 @@ def _convert_to_format(
     return obj_path
 
 
+def _convert_with_trimesh(
+    src: pathlib.Path, target_format: str, output_dir: pathlib.Path
+) -> pathlib.Path:
+    """Use trimesh for conversions involving GLB (PrusaSlicer cannot handle GLB)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"converted.{target_format}"
+    mesh = trimesh.load(str(src), force="mesh")
+    mesh.export(str(out_path))
+    if not out_path.exists():
+        raise RuntimeError(f"trimesh conversion to {target_format} failed")
+    logger.info("Converted %s → %s via trimesh", src.suffix, target_format)
+    return out_path
+
+
 # 🔁 NEW: 通用转换入口
 def convert_model(
-    src_path: pathlib.Path, target_ext: Literal[".stl", ".obj", ".3mf"]
+    src_path: pathlib.Path, target_ext: Literal[".stl", ".obj", ".3mf", ".glb"]
 ) -> pathlib.Path:
     src_ext = src_path.suffix.lower()
     job_root = src_path.parent  # ✅ 指向上传目录 /tmp/job_{hash}
@@ -90,22 +104,14 @@ def convert_model(
     if src_ext == target_ext:
         return str(src_path)  # 不转换
 
-    # 1) to 3mf
-    if target_ext == ".3mf":
-        res = _convert_to_format(src_path, "3mf", job_root / "converted")
+    # GLB cannot be handled by PrusaSlicer — use trimesh for any GLB conversion
+    if src_ext == ".glb" or target_ext == ".glb":
+        res = _convert_with_trimesh(src_path, target_ext.lstrip("."), job_root / "converted")
         return {"converted_path": str(res)}
 
-    # 2) to stl
-    if target_ext == ".stl":
-        res = _convert_to_format(src_path, "stl", job_root / "converted")
-        return {"converted_path": str(res)}
-
-    # 3) to obj
-    if target_ext == ".obj":
-        res = _convert_to_format(src_path, "obj", job_root / "converted")
-        return {"converted_path": str(res)}
-
-    raise RuntimeError(f"Unsupported conversion: {src_ext} → {target_ext}")
+    # existing PrusaSlicer paths (stl/obj/3mf ↔ stl/obj/3mf)
+    res = _convert_to_format(src_path, target_ext.lstrip("."), job_root / "converted")
+    return {"converted_path": str(res)}
 
 
 def validate(model_path: pathlib.Path) -> dict:
