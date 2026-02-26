@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libarchive-tools libfuse2 \
     # —— 构建 BambuStudio 源码所需 —— 
     # —— 编译 mathutils 等 C 扩展（可删，但第一次建议保留）↓
-    build-essential gcc g++ make                       \
+    build-essential gcc g++ make libeigen3-dev         \
     # —— 常用工具 ↓
     curl wget git ca-certificates                      \
     && rm -rf /var/lib/apt/lists/*
