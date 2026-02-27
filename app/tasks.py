@@ -120,7 +120,7 @@ def run_pipeline_task(self, src_file: str) -> dict:
 
     src_path = Path(src_file)
     suffix = src_path.suffix.lower()
-    if suffix not in {".stl", ".obj", ".3mf"}:
+    if suffix not in {".stl", ".obj", ".3mf", ".glb"}:
         raise self.retry(exc=RuntimeError(f"Unsupported extension: {suffix}"), countdown=5)
 
     job_root = src_path.parent
