@@ -14,7 +14,7 @@ BLENDER_BIN: str = os.getenv(
 BLENDER_SCRIPT: str = os.getenv("BLENDER_SCRIPT", "app/validate.py")
 PRUSASLICER_BIN: str = os.getenv("PRUSASLICER_BIN", "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer")
 
-MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
+MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "500"))
 SUPPORTED_EXTS: set[str] = {".obj", ".stl", ".glb", ".gltf", ".3mf", ".glb"}
 SUPPORTED_EXTS_CONVERT: set[str] = {".stl", ".obj", ".3mf", ".glb"}
 
