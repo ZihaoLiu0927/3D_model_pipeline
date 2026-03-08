@@ -162,15 +162,11 @@ def validate(objects):
         if poly_count > 500000:
             issues.append(f"{obj.name} 面数过多 ({poly_count})")
 
-        # 非流形几何检查
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="DESELECT")
-        bpy.ops.mesh.select_non_manifold()
-        bpy.ops.object.mode_set(mode="OBJECT")
-        non_manifold_edges = [e for e in obj.data.edges if e.select]
-        if non_manifold_edges:
+        # 非流形几何检查（用 bmesh 避免 headless 模式下 edit mode 崩溃）
+        manifold, non_manifold_count = is_manifold(obj)
+        if not manifold:
             issues.append(
-                f"模型 {obj.name} 存在非流形几何结构, {len(non_manifold_edges)}条"
+                f"模型 {obj.name} 存在非流形几何结构, {non_manifold_count}条"
             )
 
         # 材质检查

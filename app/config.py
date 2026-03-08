@@ -23,3 +23,6 @@ RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379
 
 UPLOAD_ROOT: Path = Path(os.getenv("UPLOAD_ROOT", "/tmp"))
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Seconds to keep result files before auto-cleanup. Default 1 hour.
+RESULT_TTL_SECONDS: int = int(os.getenv("RESULT_TTL_SECONDS", "3600"))

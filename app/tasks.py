@@ -9,7 +9,7 @@ from typing import Tuple
 from celery import Celery
 from kombu import Queue
 
-from .config import BROKER_URL, RESULT_BACKEND
+from .config import BROKER_URL, RESULT_BACKEND, RESULT_TTL_SECONDS
 from .pipeline import (
     validate, repair, slice_model, _convert_to_format, convert_model
 )
@@ -54,6 +54,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Celery task wrapper
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Cleanup task
+# ---------------------------------------------------------------------------
+@celery_app.task(name="app.tasks.cleanup_job_dir")
+def cleanup_job_dir(job_dir: str) -> None:
+    """Delete an entire job directory after TTL expires."""
+    try:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        logger.info("Auto-cleaned job dir: %s", job_dir)
+    except Exception:
+        logger.exception("Failed to clean job dir: %s", job_dir)
+
+
 # --- 专用切片任务：绑定到 "slice" 队列，返回 (gcode_path, slicer_log) ---------------
 @celery_app.task(name="app.tasks.slice_task", queue="slice", bind=True)
 def slice_task(self, model_path: str, output_dir: str) -> Tuple[str, str]:
@@ -101,6 +114,18 @@ def finalize_after_slice(self, slice_result: Tuple[str, str], context: dict) -> 
             shutil.rmtree(cleanup_dir, ignore_errors=True)
         except Exception:
             logger.exception("cleanup failed for %s", cleanup_dir)
+
+    # 立即删除上传的原始文件和修复中间文件（gcode 仍保留供下载）
+    original_path = context.get("original_path")
+    if original_path:
+        p = Path(original_path)
+        p.unlink(missing_ok=True)
+        p.with_suffix(".repaired.stl").unlink(missing_ok=True)
+
+    # TTL 到期后删除整个 job 目录（包含 gcode）
+    job_dir = Path(out_path_str).parent.parent
+    cleanup_job_dir.apply_async(args=[str(job_dir)], countdown=RESULT_TTL_SECONDS)
+    logger.info("Scheduled cleanup of %s in %ds", job_dir, RESULT_TTL_SECONDS)
 
     return {
         "slice_path": out_path_str,
@@ -168,7 +193,14 @@ def convert_model_task(self, src_file: str, target_ext: str) -> str:
     Returns absolute path of converted file.
     """
     try:
-        return convert_model(Path(src_file), target_ext)
+        result = convert_model(Path(src_file), target_ext)
+        # 立即删除原始上传文件
+        Path(src_file).unlink(missing_ok=True)
+        # TTL 到期后删除整个 job 目录
+        job_dir = Path(src_file).parent
+        cleanup_job_dir.apply_async(args=[str(job_dir)], countdown=RESULT_TTL_SECONDS)
+        logger.info("Scheduled cleanup of %s in %ds", job_dir, RESULT_TTL_SECONDS)
+        return result
     except Exception as exc:
         raise self.retry(exc=exc, countdown=5, max_retries=2)
 
