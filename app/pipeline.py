@@ -14,6 +14,8 @@ import shutil
 import trimesh
 import pymeshlab as ml
 import sys
+import os
+import psutil
 from typing import Literal
 
 from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
@@ -22,6 +24,14 @@ SliceFn = Callable[[pathlib.Path, pathlib.Path], Tuple[pathlib.Path, str]]
 
 
 logger = logging.getLogger(__name__)
+
+
+def _log_mem(stage: str) -> None:
+    proc = psutil.Process(os.getpid())
+    rss_mb = proc.memory_info().rss / 1024 / 1024
+    vm = psutil.virtual_memory()
+    logger.info("[MEM] %s | pid_rss=%.0fMB | host_used=%.0fMB | host_avail=%.0fMB",
+                stage, rss_mb, (vm.total - vm.available) / 1024 / 1024, vm.available / 1024 / 1024)
 
 try:
     # NEW: 直接导入解析函数（更快、少开进程）
@@ -116,6 +126,7 @@ def convert_model(
 
 def validate(model_path: pathlib.Path) -> dict:
     """Headless Blender validation via user‑supplied script."""
+    _log_mem(f"validate:start file={model_path.stat().st_size // 1024 // 1024}MB")
     raw_output = _run([BLENDER_BIN, "-b", "-P", BLENDER_SCRIPT, "--", str(model_path)])
 
     try:
@@ -127,11 +138,12 @@ def validate(model_path: pathlib.Path) -> dict:
 
 def repair(src_path: pathlib.Path) -> pathlib.Path:
     """Clean geometry using trimesh + PyMeshLab, returns repaired OBJ."""
-
+    _log_mem("repair:start")
     mesh = trimesh.load(src_path, force="mesh")
     tmp_ply = pathlib.Path(tempfile.mktemp(suffix=".ply"))
     mesh.export(tmp_ply)
 
+    _log_mem("repair:after_trimesh_load")
     ms = ml.MeshSet()
     ms.load_new_mesh(str(tmp_ply))
     ms.apply_filter("meshing_repair_non_manifold_edges")
@@ -142,6 +154,7 @@ def repair(src_path: pathlib.Path) -> pathlib.Path:
     repaired_path = src_path.with_suffix(".repaired.stl")
     ms.save_current_mesh(str(repaired_path))
     tmp_ply.unlink(missing_ok=True)
+    _log_mem("repair:done")
     return repaired_path
 
 
@@ -166,7 +179,9 @@ def slice_model(
         str(model_path),
     ]
 
+    _log_mem(f"slice:start file={model_path.stat().st_size // 1024 // 1024}MB")
     slicer_log = _run(cmd)
+    _log_mem("slice:done")
 
     produced = list(output_dir.iterdir())
     if not produced:

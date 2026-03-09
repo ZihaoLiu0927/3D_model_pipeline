@@ -29,7 +29,6 @@ services:
 
   worker-default:
     build: .
-    # 去掉 container_name 以支持 --scale 横向扩容
     depends_on: [redis]
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -37,6 +36,8 @@ services:
       - UPLOAD_ROOT=/shared_uploads
     volumes:
       - shared_uploads_volume:/shared_uploads
+    mem_limit: 6g
+    memswap_limit: 6g      # 禁用 swap，OOM 直接 kill 容器而非拖垮宿主机
     command: >
       celery -A app.tasks:celery_app worker
       --pool=prefork
@@ -55,6 +56,8 @@ services:
       - UPLOAD_ROOT=/shared_uploads
     volumes:
       - shared_uploads_volume:/shared_uploads
+    mem_limit: 4g
+    memswap_limit: 4g
     command: >
       celery -A app.tasks:celery_app worker
       --pool=prefork
