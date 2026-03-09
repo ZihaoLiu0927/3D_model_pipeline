@@ -15,24 +15,26 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - UPLOAD_ROOT=/shared_uploads # Set UPLOAD_ROOT to the shared volume path
+      - UPLOAD_ROOT=/shared_uploads
     ports:
       - "8000:8000"
     volumes:
-      - shared_uploads_volume:/shared_uploads # Mount the shared volume
+      - shared_uploads_volume:/shared_uploads
       - ./app/my_config.ini:/app/my_config.ini
-    command: > # This will be passed as arguments to the ENTRYPOINT script
+    command: >
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
+      --workers 2
 
   worker-default:
     build: .
-    container_name: pipeline-worker-default
+    # 去掉 container_name 以支持 --scale 横向扩容
     depends_on: [redis]
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UPLOAD_ROOT=/shared_uploads
     volumes:
       - shared_uploads_volume:/shared_uploads
     command: >
@@ -44,11 +46,13 @@ services:
 
   worker-slicer:
     build: .
-    container_name: pipeline-worker-slicer
+    deploy:
+      replicas: 3
     depends_on: [redis]
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UPLOAD_ROOT=/shared_uploads
     volumes:
       - shared_uploads_volume:/shared_uploads
     command: >
@@ -60,4 +64,4 @@ services:
 
 volumes:
   redis-data:
-  shared_uploads_volume: # Define the named volume
+  shared_uploads_volume:
