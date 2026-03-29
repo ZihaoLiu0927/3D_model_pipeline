@@ -152,7 +152,7 @@ def slice_model(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     profiles_dir = pathlib.Path(CURAENGINE_PROFILES_DIR)
-    fdmprinter_def = profiles_dir / "fdmprinter.def.json"
+    fdmprinter_def = pathlib.Path(CURAENGINE_DEFINITIONS_DIR) / "fdmprinter.def.json"
     custom_def = profiles_dir / "custom.def.json"
     out_gcode = output_dir / (model_path.stem + ".gcode")
 
