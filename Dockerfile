@@ -10,7 +10,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     # CLI 路径写成环境变量，代码里的 config.py 会读取
     BLENDER_BIN=/usr/local/bin/blender \
-    PRUSASLICER_BIN=/opt/PrusaSlicer/AppRun
+    CURAENGINE_BIN=/usr/bin/CuraEngine \
+    CURAENGINE_PROFILES_DIR=/app/app/profiles \
+    CURAENGINE_DEFINITIONS_DIR=/app/app/profiles/definitions
 
 ############################
 #  系统运行库 + 构建工具
@@ -41,18 +43,6 @@ RUN apt-get update && \
     libwebkit2gtk-4.1-0 \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PRUSASLICER_VERSION="2.8.1"
-ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
-ENV PRUSASLICER_DOWNLOAD_URL="https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/${PRUSASLICER_FILENAME}"
-
-RUN wget "${PRUSASLICER_DOWNLOAD_URL}" -O /tmp/PrusaSlicer.AppImage && \
-    chmod +x /tmp/PrusaSlicer.AppImage && \
-    /tmp/PrusaSlicer.AppImage --appimage-extract && \
-    mv squashfs-root /opt/PrusaSlicer && \
-    rm /tmp/PrusaSlicer.AppImage
-
-ENV PATH="/opt/PrusaSlicer/usr/bin:$PATH"
-
 ############################
 #  安装 Blender (headless)
 ############################
@@ -66,19 +56,11 @@ RUN curl -fSL \
     && rm blender.tar.xz
 
 ############################
-#  安装 PrusaSplicer CLI 
+#  安装 CuraEngine CLI
 ############################
-ENV PRUSASLICER_VERSION="2.8.1"
-ENV PRUSASLICER_FILENAME="PrusaSlicer-${PRUSASLICER_VERSION}+linux-x64-newer-distros-GTK3-202409181416.AppImage"
-ENV PRUSASLICER_DOWNLOAD_URL="https://github.com/prusa3d/PrusaSlicer/releases/download/version_${PRUSASLICER_VERSION}/${PRUSASLICER_FILENAME}"
-
-RUN wget "${PRUSASLICER_DOWNLOAD_URL}" -O /tmp/PrusaSlicer.AppImage && \
-    chmod +x /tmp/PrusaSlicer.AppImage && \
-    /tmp/PrusaSlicer.AppImage --appimage-extract && \
-    mv squashfs-root /opt/PrusaSlicer && \
-    rm /tmp/PrusaSlicer.AppImage
-
-ENV PATH="/opt/PrusaSlicer/usr/bin:$PATH"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cura-engine \
+    && rm -rf /var/lib/apt/lists/*
 
 ############################
 #  Python 依赖
@@ -92,6 +74,14 @@ RUN pip install --upgrade pip \
 #  复制业务代码 & 默认入口
 ############################
 COPY app /app/app
+
+# 下载 CuraEngine definitions（与 apt cura-engine 4.13 版本对应）
+RUN mkdir -p /app/app/profiles/definitions && \
+    for f in fdmprinter.def.json fdmextruder.def.json; do \
+    wget -q "https://raw.githubusercontent.com/Ultimaker/Cura/4.13/resources/definitions/${f}" \
+    -O /app/app/profiles/definitions/${f}; \
+    done
+
 ENV PYTHONPATH=/app
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

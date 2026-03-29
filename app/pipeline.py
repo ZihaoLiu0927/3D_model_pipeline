@@ -18,7 +18,7 @@ import os
 import psutil
 from typing import Literal
 
-from .config import BLENDER_BIN, BLENDER_SCRIPT, PRUSASLICER_BIN, SUPPORTED_EXTS
+from .config import BLENDER_BIN, BLENDER_SCRIPT, CURAENGINE_BIN, CURAENGINE_PROFILES_DIR, CURAENGINE_DEFINITIONS_DIR, SUPPORTED_EXTS
 from typing import Callable, Tuple
 SliceFn = Callable[[pathlib.Path, pathlib.Path], Tuple[pathlib.Path, str]]
 
@@ -67,27 +67,13 @@ def _convert_to_format(
     src: pathlib.Path, target_format: str, output_dir: pathlib.Path
 ) -> pathlib.Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    obj_path = output_dir / ("converted." + target_format)
-
-    result = subprocess.run(
-        [
-            PRUSASLICER_BIN,
-            ("--export-" + target_format), 
-            "--output",
-            str(obj_path),  
-            str(src), 
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        check=False,
-    )
-
-    if result.returncode != 0 or not obj_path.exists():
-        raise RuntimeError(f"3MF→OBJ conversion failed:\n{result.stdout}")
-
-    logger.info("Converted 3MF → OBJ: %s", obj_path)
-    return obj_path
+    out_path = output_dir / ("converted." + target_format)
+    mesh = trimesh.load(str(src), force="mesh")
+    mesh.export(str(out_path))
+    if not out_path.exists():
+        raise RuntimeError(f"Conversion to {target_format} failed: {src}")
+    logger.info("Converted %s → %s via trimesh: %s", src.suffix, target_format, out_path)
+    return out_path
 
 
 def _convert_with_trimesh(
@@ -100,7 +86,7 @@ def _convert_with_trimesh(
     mesh.export(str(out_path))
     if not out_path.exists():
         raise RuntimeError(f"trimesh conversion to {target_format} failed")
-    logger.info("Converted %s → %s via trimesh", src.suffix, target_format)
+    logger.info("Converted %s → %s via trimesh: %s", src.suffix, target_format, out_path)
     return out_path
 
 
@@ -161,22 +147,20 @@ def repair(src_path: pathlib.Path) -> pathlib.Path:
 def slice_model(
     model_path: pathlib.Path, output_dir: pathlib.Path
 ) -> Tuple[pathlib.Path, str]:
-    """Invoke Bambu Studio CLI and return the generated slice (G‑code/3MF)."""
+    """Invoke CuraEngine CLI and return the generated G-code file."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ✅ 修正这里：不要写成 "app/app/no_bgcode.ini"
-    profile = _resolve_profile("no_bgcode.ini")   # 放在 app/no_bgcode.ini 即可
+    profiles_dir = pathlib.Path(CURAENGINE_PROFILES_DIR)
+    fdmprinter_def = profiles_dir / "fdmprinter.def.json"
+    custom_def = profiles_dir / "custom.def.json"
     out_gcode = output_dir / (model_path.stem + ".gcode")
 
-    cmd = [PRUSASLICER_BIN]
-    if profile is not None:
-        cmd += ["--load", str(profile)]
-    # 用规范参数导出 G-code（PrusaSlicer）
-    cmd += [
-        "--export-gcode",
-        "--output",
-        str(out_gcode),   # 直接指定目标文件名，避免遍历目录找
-        str(model_path),
+    cmd = [
+        CURAENGINE_BIN, "slice", "-v",
+        "-d", CURAENGINE_DEFINITIONS_DIR,
+        "-j", str(custom_def),
+        "-l", str(model_path),
+        "-o", str(out_gcode),
     ]
 
     _log_mem(f"slice:start file={model_path.stat().st_size // 1024 // 1024}MB")
@@ -191,31 +175,6 @@ def slice_model(
         if f.suffix.lower() in {".gcode", ".bgcode"}:
             return f, slicer_log
     return produced[0], slicer_log
-
-
-def _resolve_profile(fname: str) -> pathlib.Path | None:
-    """
-    尝试解析切片配置文件的位置，依次：
-    1) 绝对路径（如果传进来的就是绝对路径）
-    2) 与本文件同目录（app/no_bgcode.ini）
-    3) 项目根目录（app 的上一级）下的 app/<fname>
-    找不到则返回 None
-    """
-    p = pathlib.Path(fname)
-    if p.is_absolute() and p.exists():
-        return p
-
-    here = pathlib.Path(__file__).resolve().parent              # .../app
-    cand1 = here / fname                                        # app/no_bgcode.ini
-    if cand1.exists():
-        return cand1
-
-    proj_root = here.parent                                     # 项目根
-    cand2 = proj_root / "app" / fname                           # <root>/app/no_bgcode.ini
-    if cand2.exists():
-        return cand2
-
-    return None
 
 # ---------------------------------------------------------------------------
 # High‑level orchestration
@@ -250,12 +209,10 @@ def process_model(src_file: str, slice_fn: SliceFn | None = None) -> dict[str, s
     validate_report = validate(src_path)
     timer.mark("validate done")
 
-    if original_suffix != ".3mf":
-        repaired = repair(src_path)
-        timer.mark("repair done")
-    else:
-        # skip fix for .3mf file for now
-        repaired = original_path
+    # CuraEngine only accepts .stl — always repair so output is .repaired.stl
+    repaired = repair(src_path)
+    timer.mark("repair done")
+    logger.info("[process_model] repaired model: %s  (exists=%s, size=%s)", repaired, repaired.exists(), repaired.stat().st_size if repaired.exists() else 'N/A')
     
     target_dir = job_root / "sliced"
     if slice_fn is None:

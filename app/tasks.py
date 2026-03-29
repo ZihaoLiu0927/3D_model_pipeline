@@ -18,7 +18,6 @@ from .gcode_status_parser import process_gcode_file as parse_gcode_status
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("APPIMAGE_EXTRACT_AND_RUN", "1")
 os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 # ---------------------------------------------------------------------------
 # Celery application
@@ -162,13 +161,9 @@ def run_pipeline_task(self, src_file: str) -> dict:
     # validate
     validate_report = validate(src_path)
 
-    # repair：按你原逻辑，.3mf 跳过
-    skipped_repair = False
-    if original_suffix != ".3mf":
-        repaired = repair(src_path)
-    else:
-        repaired = original_path
-        skipped_repair = True
+    # CuraEngine only accepts .stl — always repair so output is .repaired.stl
+    repaired = repair(src_path)
+    logger.info("[run_pipeline_task] repaired model: %s  (exists=%s, size=%s)", repaired, repaired.exists(), repaired.stat().st_size if repaired.exists() else 'N/A')
 
     # 交由 slice 专用队列（串行化）
     target_dir = job_root / "sliced"
@@ -179,7 +174,6 @@ def run_pipeline_task(self, src_file: str) -> dict:
         "validate_report": validate_report,
         "cleanup_dir": str(cleanup_dir) if cleanup_dir else None,
         "original_path": str(original_path),
-        "skipped_repair": skipped_repair,
     }
     finalize_sig = finalize_after_slice.s(context)
 
