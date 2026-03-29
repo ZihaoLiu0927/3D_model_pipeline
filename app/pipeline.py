@@ -43,12 +43,13 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Low‑level helpers
 # ---------------------------------------------------------------------------
-def _run(cmd: List[str], cwd: str | pathlib.Path | None = None) -> str:
+def _run(cmd: List[str], cwd: str | pathlib.Path | None = None, env: dict | None = None) -> str:
     """Run external command *cmd* and raise *RuntimeError* on failure."""
     logger.info("$ %s", " ".join(cmd))
     completed = subprocess.run(
         cmd,
         cwd=cwd,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -157,14 +158,17 @@ def slice_model(
 
     cmd = [
         CURAENGINE_BIN, "slice", "-v",
-        "-d", CURAENGINE_DEFINITIONS_DIR,
+        "-j", str(fdmprinter_def),
         "-j", str(custom_def),
         "-l", str(model_path),
         "-o", str(out_gcode),
     ]
 
+    env = os.environ.copy()
+    env["CURA_ENGINE_SEARCH_PATH"] = CURAENGINE_DEFINITIONS_DIR
+
     _log_mem(f"slice:start file={model_path.stat().st_size // 1024 // 1024}MB")
-    slicer_log = _run(cmd)
+    slicer_log = _run(cmd, env=env)
     _log_mem("slice:done")
 
     produced = list(output_dir.iterdir())
