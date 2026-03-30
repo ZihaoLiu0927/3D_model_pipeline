@@ -1,47 +1,10 @@
 # syntax=docker/dockerfile:1
 
 ############################
-# Stage 1: 从 AppImage 提取 CuraEngine 5.x
-# 将下载/解压与运行时完全隔离，最终镜像不含 AppImage 残余
+#  基础层：Python 3.11 运行时
 ############################
-FROM --platform=linux/amd64 debian:bookworm-slim AS cura-extractor
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG CURA_VER=5.12.0
-RUN set -e \
-    # --tries=5 --waitretry=15 应对 AWS 出口 IP 偶发被 GitHub CDN 限速
-    && wget -q --tries=5 --timeout=600 --waitretry=15 \
-       "https://github.com/Ultimaker/Cura/releases/download/${CURA_VER}/UltiMaker-Cura-${CURA_VER}-linux-X64.AppImage" \
-       -O /tmp/cura.AppImage \
-    && chmod +x /tmp/cura.AppImage \
-    # --appimage-extract 不依赖 FUSE，在容器内安全运行
-    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
-    # 定位 CuraEngine 二进制
-    && CURA_BIN=$(find /tmp/squashfs-root -name 'CuraEngine' -type f | head -1) \
-    && test -n "$CURA_BIN" && echo "Found CuraEngine: $CURA_BIN" \
-    && install -Dm755 "$CURA_BIN" /opt/CuraEngine.bin \
-    # 提取运行时所需的全部 Ultimaker/protobuf 相关动态库
-    && mkdir -p /opt/cura-libs \
-    && find /tmp/squashfs-root \( \
-         -name 'libarcus*'       \
-         -o -name 'libprotobuf*' \
-         -o -name 'libpolyclipping*' \
-         -o -name 'libnest2d*'   \
-         -o -name 'libSavitar*'  \
-         -o -name 'libpython3*'  \
-       \) | xargs -I{} cp -P {} /opt/cura-libs/ 2>/dev/null || true \
-    # 定位打印机定义目录
-    && CURA_DEFS=$(find /tmp/squashfs-root -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
-    && test -n "$CURA_DEFS" && echo "Found definitions: $CURA_DEFS" \
-    && mkdir -p /opt/cura-defs \
-    && cp -r "$CURA_DEFS"/. /opt/cura-defs/
-
-############################
-#  Stage 2: Python 3.11 运行时
-############################
+# 【注意】AWS 部署时，确保你的计算实例（EC2/Fargate）是 x86_64 架构。
+# 如果使用 Graviton (ARM64) 实例，这个 amd64 的 AppImage 将无法运行。
 FROM --platform=linux/amd64 python:3.11-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -55,14 +18,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #  系统运行库 + 构建工具
 ############################
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglu1-mesa libqt5widgets5 \
+    libgl1 libglu1-mesa libqt5widgets5 qtbase5-dev \
     libxrender1 libxrandr2 libxi6 libopengl0 \
     libarchive-tools libfuse2 \
     build-essential gcc g++ make libeigen3-dev \
     curl wget git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     libfontconfig1 \
     libgtk-3-0 \
     libxkbcommon-x11-0 \
@@ -88,15 +52,30 @@ RUN curl -fSL \
     && rm blender.tar.xz
 
 ############################
-#  从 Stage 1 复制 CuraEngine 5.x 及其依赖
+#  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
 ############################
-COPY --from=cura-extractor /opt/CuraEngine.bin /opt/CuraEngine.bin
-COPY --from=cura-extractor /opt/cura-libs      /opt/cura-libs
-COPY --from=cura-extractor /opt/cura-defs      /app/app/profiles/definitions
+RUN wget -q \
+    "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
+    -O /tmp/cura.AppImage \
+    && chmod +x /tmp/cura.AppImage \
+    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
+    # 【核心修改 1】：不要去猜测和挑选 .so 文件，直接保留完整的 AppImage 依赖环境
+    && mv /tmp/squashfs-root /opt/cura \
+    # 提取 definitions 目录
+    && CURA_DEFS=$(find /opt/cura -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
+    && echo "Found definitions at: $CURA_DEFS" \
+    && mkdir -p /app/app/profiles/definitions \
+    && cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/ \
+    # 清理无用的 AppImage 文件释放空间
+    && rm -f /tmp/cura.AppImage
 
-# wrapper：注入 AppImage 运行时库路径
-RUN printf '#!/bin/sh\nexec env LD_LIBRARY_PATH=/opt/cura-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} /opt/CuraEngine.bin "$@"\n' \
-    > /usr/local/bin/CuraEngine && chmod +x /usr/local/bin/CuraEngine
+# 【核心修改 2】：编写更稳健的 Wrapper 脚本，注入 AppImage 的标准库路径
+RUN CURA_BIN=$(find /opt/cura -name 'CuraEngine' -type f | head -1) \
+    && echo '#!/bin/sh' > /usr/local/bin/CuraEngine \
+    # 包含 AppImage 内置的各种 lib 路径（兼容 x86_64-linux-gnu）
+    && echo 'export LD_LIBRARY_PATH="/opt/cura/usr/lib:/opt/cura/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"' >> /usr/local/bin/CuraEngine \
+    && echo 'exec "'$CURA_BIN'" "$@"' >> /usr/local/bin/CuraEngine \
+    && chmod +x /usr/local/bin/CuraEngine
 
 ############################
 #  Python 依赖
