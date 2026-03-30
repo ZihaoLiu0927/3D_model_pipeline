@@ -4,13 +4,11 @@
 #  基础层：Python 3.11 运行时
 ############################
 FROM --platform=linux/amd64 python:3.11-slim-bookworm
-# 官方镜像自带 debian 12 (bookworm) + CPython 3.11，体积小且长期维护 :contentReference[oaicite:0]{index=0}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    # CLI 路径写成环境变量，代码里的 config.py 会读取
     BLENDER_BIN=/usr/local/bin/blender \
-    CURAENGINE_BIN=/usr/bin/CuraEngine \
+    CURAENGINE_BIN=/usr/local/bin/CuraEngine \
     CURAENGINE_PROFILES_DIR=/app/app/profiles \
     CURAENGINE_DEFINITIONS_DIR=/app/app/profiles/definitions
 
@@ -18,15 +16,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #  系统运行库 + 构建工具
 ############################
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # —— 运行期必需 —— (PyMeshLab/OpenGL 等) ↓
     libgl1 libglu1-mesa libqt5widgets5 qtbase5-dev \
     libxrender1 libxrandr2 libxi6 libopengl0 \
     libarchive-tools libfuse2 \
-    # —— 构建 BambuStudio 源码所需 —— 
-    # —— 编译 mathutils 等 C 扩展（可删，但第一次建议保留）↓
-    build-essential gcc g++ make libeigen3-dev         \
-    # —— 常用工具 ↓
-    curl wget git ca-certificates                      \
+    build-essential gcc g++ make libeigen3-dev \
+    curl wget git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && \
@@ -56,11 +50,31 @@ RUN curl -fSL \
     && rm blender.tar.xz
 
 ############################
-#  安装 CuraEngine CLI
+#  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
+#  apt 的 cura-engine 只有 4.13，5.x 通过 AppImage 安装
 ############################
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cura-engine \
-    && rm -rf /var/lib/apt/lists/*
+RUN wget -q \
+    "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
+    -O /tmp/cura.AppImage \
+    && chmod +x /tmp/cura.AppImage \
+    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
+    # 安装 CuraEngine 二进制（放到 /opt 避免被 wrapper 覆盖）
+    && install -Dm755 /tmp/squashfs-root/usr/bin/CuraEngine /opt/CuraEngine.bin \
+    # 提取 CuraEngine 依赖的运行时库（libarcus5 等 apt 没有的版本）
+    && mkdir -p /opt/cura-libs \
+    && find /tmp/squashfs-root/usr/lib -maxdepth 1 \( \
+         -name 'libarcus*' -o -name 'libprotobuf*' \
+         -o -name 'libpolyclipping*' -o -name 'libnest2d*' \) \
+       -exec cp -P {} /opt/cura-libs/ \; \
+    # 提取 definitions（与二进制版本严格匹配）
+    && mkdir -p /app/app/profiles/definitions \
+    && cp -r /tmp/squashfs-root/share/cura/resources/definitions/. \
+             /app/app/profiles/definitions/ \
+    && rm -rf /tmp/cura.AppImage /tmp/squashfs-root
+
+# wrapper：CURAENGINE_BIN 指向这里，注入 AppImage 的运行时库路径
+RUN printf '#!/bin/sh\nexec env LD_LIBRARY_PATH=/opt/cura-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} /opt/CuraEngine.bin "$@"\n' \
+    > /usr/local/bin/CuraEngine && chmod +x /usr/local/bin/CuraEngine
 
 ############################
 #  Python 依赖
@@ -74,13 +88,6 @@ RUN pip install --upgrade pip \
 #  复制业务代码 & 默认入口
 ############################
 COPY app /app/app
-
-# 下载 CuraEngine 完整 definitions（与 apt cura-engine 4.13 版本对应）
-RUN mkdir -p /app/app/profiles/definitions && \
-    wget -q "https://github.com/Ultimaker/Cura/archive/refs/tags/4.13.1.tar.gz" -O /tmp/cura.tar.gz && \
-    tar -xzf /tmp/cura.tar.gz -C /tmp "Cura-4.13.1/resources/definitions/" && \
-    mv /tmp/Cura-4.13.1/resources/definitions/* /app/app/profiles/definitions/ && \
-    rm -rf /tmp/cura.tar.gz /tmp/Cura-4.13.1
 
 ENV PYTHONPATH=/app
 EXPOSE 8000
