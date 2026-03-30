@@ -78,9 +78,9 @@ COPY app /app/app
 # 下载 CuraEngine 完整 definitions（与本地 5.12.0 版本一致）
 RUN mkdir -p /app/app/profiles/definitions && \
     wget -q "https://github.com/Ultimaker/Cura/archive/refs/tags/5.12.0.tar.gz" -O /tmp/cura.tar.gz && \
-    tar -xzf /tmp/cura.tar.gz -C /tmp "Cura-5.12.0/resources/definitions/" --strip-components=3 && \
-    mv /tmp/definitions/* /app/app/profiles/definitions/ && \
-    rm -rf /tmp/cura.tar.gz /tmp/definitions
+    tar -xzf /tmp/cura.tar.gz -C /tmp "Cura-5.12.0/resources/definitions/" && \
+    mv /tmp/Cura-5.12.0/resources/definitions/* /app/app/profiles/definitions/ && \
+    rm -rf /tmp/cura.tar.gz /tmp/Cura-5.12.0
 
 ENV PYTHONPATH=/app
 EXPOSE 8000
