@@ -58,18 +58,20 @@ RUN wget -q \
     -O /tmp/cura.AppImage \
     && chmod +x /tmp/cura.AppImage \
     && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
-    # 安装 CuraEngine 二进制（放到 /opt 避免被 wrapper 覆盖）
-    && install -Dm755 /tmp/squashfs-root/usr/bin/CuraEngine /opt/CuraEngine.bin \
-    # 提取 CuraEngine 依赖的运行时库（libarcus5 等 apt 没有的版本）
+    # 动态定位 CuraEngine 二进制（AppImage 内部路径因版本而异）
+    && CURA_BIN=$(find /tmp/squashfs-root -name 'CuraEngine' -type f | head -1) \
+    && echo "Found CuraEngine at: $CURA_BIN" \
+    && install -Dm755 "$CURA_BIN" /opt/CuraEngine.bin \
+    # 提取 CuraEngine 依赖的运行时库
     && mkdir -p /opt/cura-libs \
-    && find /tmp/squashfs-root/usr/lib -maxdepth 1 \( \
-         -name 'libarcus*' -o -name 'libprotobuf*' \
-         -o -name 'libpolyclipping*' -o -name 'libnest2d*' \) \
-       -exec cp -P {} /opt/cura-libs/ \; \
-    # 提取 definitions（与二进制版本严格匹配）
+    && find /tmp/squashfs-root -name 'libarcus*' -o -name 'libprotobuf*' \
+       -o -name 'libpolyclipping*' -o -name 'libnest2d*' \
+       | xargs -I{} cp -P {} /opt/cura-libs/ 2>/dev/null || true \
+    # 动态定位 definitions 目录
+    && CURA_DEFS=$(find /tmp/squashfs-root -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
+    && echo "Found definitions at: $CURA_DEFS" \
     && mkdir -p /app/app/profiles/definitions \
-    && cp -r /tmp/squashfs-root/share/cura/resources/definitions/. \
-             /app/app/profiles/definitions/ \
+    && cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/ \
     && rm -rf /tmp/cura.AppImage /tmp/squashfs-root
 
 # wrapper：CURAENGINE_BIN 指向这里，注入 AppImage 的运行时库路径
