@@ -100,7 +100,20 @@ def finalize_after_slice(self, slice_result: Tuple[str, str], context: dict) -> 
     gcode_status = None
     try:
         from .gcode_status_parser import process_gcode_file as parse_gcode_status
+        import os as _os
+        gcode_size = _os.path.getsize(out_path_str) if _os.path.exists(out_path_str) else -1
+        logger.info("Parsing gcode: %s (size=%d bytes)", out_path_str, gcode_size)
         gcode_status = parse_gcode_status(out_path_str)
+        if not gcode_status.get("extruders"):
+            logger.warning("extruders is empty after parsing %s — dumping first 30 lines:", out_path_str)
+            try:
+                with open(out_path_str, "r", errors="ignore") as _f:
+                    for _i, _l in enumerate(_f):
+                        if _i >= 30:
+                            break
+                        logger.warning("  gcode[%d]: %s", _i, _l.rstrip())
+            except Exception:
+                pass
     except Exception as e:
         logger.exception("G-code status parse failed: %s", e)
         gcode_status = {"ok": False, "error": str(e)}
