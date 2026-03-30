@@ -1,7 +1,46 @@
 # syntax=docker/dockerfile:1
 
 ############################
-#  基础层：Python 3.11 运行时
+# Stage 1: 从 AppImage 提取 CuraEngine 5.x
+# 将下载/解压与运行时完全隔离，最终镜像不含 AppImage 残余
+############################
+FROM --platform=linux/amd64 debian:bookworm-slim AS cura-extractor
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG CURA_VER=5.12.0
+RUN set -e \
+    # --tries=5 --waitretry=15 应对 AWS 出口 IP 偶发被 GitHub CDN 限速
+    && wget -q --tries=5 --timeout=600 --waitretry=15 \
+       "https://github.com/Ultimaker/Cura/releases/download/${CURA_VER}/UltiMaker-Cura-${CURA_VER}-linux-X64.AppImage" \
+       -O /tmp/cura.AppImage \
+    && chmod +x /tmp/cura.AppImage \
+    # --appimage-extract 不依赖 FUSE，在容器内安全运行
+    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
+    # 定位 CuraEngine 二进制
+    && CURA_BIN=$(find /tmp/squashfs-root -name 'CuraEngine' -type f | head -1) \
+    && test -n "$CURA_BIN" && echo "Found CuraEngine: $CURA_BIN" \
+    && install -Dm755 "$CURA_BIN" /opt/CuraEngine.bin \
+    # 提取运行时所需的全部 Ultimaker/protobuf 相关动态库
+    && mkdir -p /opt/cura-libs \
+    && find /tmp/squashfs-root \( \
+         -name 'libarcus*'       \
+         -o -name 'libprotobuf*' \
+         -o -name 'libpolyclipping*' \
+         -o -name 'libnest2d*'   \
+         -o -name 'libSavitar*'  \
+         -o -name 'libpython3*'  \
+       \) | xargs -I{} cp -P {} /opt/cura-libs/ 2>/dev/null || true \
+    # 定位打印机定义目录
+    && CURA_DEFS=$(find /tmp/squashfs-root -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
+    && test -n "$CURA_DEFS" && echo "Found definitions: $CURA_DEFS" \
+    && mkdir -p /opt/cura-defs \
+    && cp -r "$CURA_DEFS"/. /opt/cura-defs/
+
+############################
+#  Stage 2: Python 3.11 运行时
 ############################
 FROM --platform=linux/amd64 python:3.11-slim-bookworm
 
@@ -16,15 +55,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #  系统运行库 + 构建工具
 ############################
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglu1-mesa libqt5widgets5 qtbase5-dev \
+    libgl1 libglu1-mesa libqt5widgets5 \
     libxrender1 libxrandr2 libxi6 libopengl0 \
     libarchive-tools libfuse2 \
     build-essential gcc g++ make libeigen3-dev \
     curl wget git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libfontconfig1 \
     libgtk-3-0 \
     libxkbcommon-x11-0 \
@@ -50,31 +88,13 @@ RUN curl -fSL \
     && rm blender.tar.xz
 
 ############################
-#  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
-#  apt 的 cura-engine 只有 4.13，5.x 通过 AppImage 安装
+#  从 Stage 1 复制 CuraEngine 5.x 及其依赖
 ############################
-RUN wget -q \
-    "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
-    -O /tmp/cura.AppImage \
-    && chmod +x /tmp/cura.AppImage \
-    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
-    # 动态定位 CuraEngine 二进制（AppImage 内部路径因版本而异）
-    && CURA_BIN=$(find /tmp/squashfs-root -name 'CuraEngine' -type f | head -1) \
-    && echo "Found CuraEngine at: $CURA_BIN" \
-    && install -Dm755 "$CURA_BIN" /opt/CuraEngine.bin \
-    # 提取 CuraEngine 依赖的运行时库
-    && mkdir -p /opt/cura-libs \
-    && find /tmp/squashfs-root -name 'libarcus*' -o -name 'libprotobuf*' \
-       -o -name 'libpolyclipping*' -o -name 'libnest2d*' \
-       | xargs -I{} cp -P {} /opt/cura-libs/ 2>/dev/null || true \
-    # 动态定位 definitions 目录
-    && CURA_DEFS=$(find /tmp/squashfs-root -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
-    && echo "Found definitions at: $CURA_DEFS" \
-    && mkdir -p /app/app/profiles/definitions \
-    && cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/ \
-    && rm -rf /tmp/cura.AppImage /tmp/squashfs-root
+COPY --from=cura-extractor /opt/CuraEngine.bin /opt/CuraEngine.bin
+COPY --from=cura-extractor /opt/cura-libs      /opt/cura-libs
+COPY --from=cura-extractor /opt/cura-defs      /app/app/profiles/definitions
 
-# wrapper：CURAENGINE_BIN 指向这里，注入 AppImage 的运行时库路径
+# wrapper：注入 AppImage 运行时库路径
 RUN printf '#!/bin/sh\nexec env LD_LIBRARY_PATH=/opt/cura-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} /opt/CuraEngine.bin "$@"\n' \
     > /usr/local/bin/CuraEngine && chmod +x /usr/local/bin/CuraEngine
 
