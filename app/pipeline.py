@@ -138,6 +138,10 @@ def repair(src_path: pathlib.Path) -> pathlib.Path:
     ms.apply_filter("meshing_remove_unreferenced_vertices")
     ms.apply_filter("meshing_close_holes", maxholesize=1000)
 
+    # 居中模型：CuraEngine 4.x 不会自动重定位，坐标偏离原点会导致 LAYER_COUNT:0
+    ms.apply_filter("compute_matrix_from_translation",
+                    traslmethod="Center on Scene BBox")
+
     repaired_path = src_path.with_suffix(".repaired.stl")
     ms.save_current_mesh(str(repaired_path))
     tmp_ply.unlink(missing_ok=True)
