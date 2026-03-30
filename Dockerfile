@@ -75,12 +75,12 @@ RUN pip install --upgrade pip \
 ############################
 COPY app /app/app
 
-# 下载 CuraEngine definitions（与 apt cura-engine 5.12 版本对应）
+# 下载 CuraEngine 完整 definitions（与本地 5.12.0 版本一致）
 RUN mkdir -p /app/app/profiles/definitions && \
-    for f in fdmprinter.def.json fdmextruder.def.json; do \
-    wget -q "https://raw.githubusercontent.com/Ultimaker/Cura/5.12.0/resources/definitions/${f}" \
-    -O /app/app/profiles/definitions/${f}; \
-    done
+    wget -q "https://github.com/Ultimaker/Cura/archive/refs/tags/5.12.0.tar.gz" -O /tmp/cura.tar.gz && \
+    tar -xzf /tmp/cura.tar.gz -C /tmp "Cura-5.12.0/resources/definitions/" --strip-components=3 && \
+    mv /tmp/definitions/* /app/app/profiles/definitions/ && \
+    rm -rf /tmp/cura.tar.gz /tmp/definitions
 
 ENV PYTHONPATH=/app
 EXPOSE 8000
