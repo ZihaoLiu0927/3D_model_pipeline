@@ -5,7 +5,8 @@
 ############################
 # 【注意】AWS 部署时，确保你的计算实例（EC2/Fargate）是 x86_64 架构。
 # 如果使用 Graviton (ARM64) 实例，这个 amd64 的 AppImage 将无法运行。
-FROM --platform=linux/amd64 python:3.11-slim-bookworm
+ARG TARGETPLATFORM=linux/amd64
+FROM --platform=${TARGETPLATFORM} python:3.11-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -22,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 libxrandr2 libxi6 libopengl0 \
     libarchive-tools libfuse2 squashfs-tools \
     build-essential gcc g++ make libeigen3-dev \
+    patchelf \
     curl wget git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -74,9 +76,11 @@ RUN printf '%s\n' \
 #  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
 ############################
 RUN set -eux; \
-    wget -q \
+    df -h /tmp /opt; \
+    curl --fail --location --retry 5 --retry-delay 2 --show-error \
         "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
-        -O /tmp/cura.AppImage; \
+        --output /tmp/cura.AppImage; \
+    ls -lh /tmp/cura.AppImage; \
     for OFFSET in $(LC_ALL=C grep -aob 'hsqs' /tmp/cura.AppImage | cut -d: -f1); do \
         rm -rf /opt/cura; \
         if unsquashfs -q -o "$OFFSET" -d /opt/cura /tmp/cura.AppImage; then \
@@ -89,6 +93,16 @@ RUN set -eux; \
     mkdir -p /app/app/profiles/definitions; \
     cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/; \
     rm -f /tmp/cura.AppImage
+
+# Patch all ELF binaries extracted from the AppImage to use the system interpreter.
+# AppImage binaries embed a custom interpreter path (e.g. /opt/cura/lib/ld-linux*.so)
+# that doesn't exist outside the AppImage runtime, causing "exec: not found" failures.
+RUN INTERP="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"; \
+    find /opt/cura -type f -perm /111 | while read -r f; do \
+        if file "$f" 2>/dev/null | grep -q 'ELF.*dynamically linked'; then \
+            patchelf --set-interpreter "$INTERP" "$f" 2>/dev/null || true; \
+        fi; \
+    done
 
 # 【核心修改 2】：编写更稳健的 Wrapper 脚本，注入 AppImage 的标准库路径
 RUN set -eux; \
