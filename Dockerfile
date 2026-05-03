@@ -109,18 +109,20 @@ RUN set -eux; \
     test -n "$CURA_BIN"; \
     CURA_BIN_REAL="$(readlink -f "$CURA_BIN")"; \
     echo "Using CuraEngine: $CURA_BIN_REAL"; \
-    patchelf --set-interpreter /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 "$CURA_BIN_REAL"; \
+    echo "$CURA_BIN_REAL" > /opt/cura/CuraEngine.path; \
     printf '%s\n' \
     '#!/bin/sh' \
     'set -eu' \
-    'CURA_BIN="/opt/cura/CuraEngine.real"' \
-    'CURA_LIB_PATHS="$(find /opt/cura -type f -name "*.so*" -printf "%h\n" | sort -u | tr "\n" ":")"' \
-    'export LD_LIBRARY_PATH="${CURA_LIB_PATHS}${LD_LIBRARY_PATH:-}"' \
+    'CURA_BIN="$(cat /opt/cura/CuraEngine.path)"' \
+    'export LD_LIBRARY_PATH="/opt/cura:/opt/cura/runtime/compat:/opt/cura/runtime/compat/usr/lib/x86_64-linux-gnu:/opt/cura/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"' \
     'exec "$CURA_BIN" "$@"' \
     > /usr/local/bin/CuraEngine; \
-    cp "$CURA_BIN_REAL" /opt/cura/CuraEngine.real; \
-    chmod +x /opt/cura/CuraEngine.real /usr/local/bin/CuraEngine; \
-    /usr/local/bin/CuraEngine --help >/tmp/cura_help.txt 2>&1 || cat /tmp/cura_help.txt
+    chmod +x /usr/local/bin/CuraEngine; \
+    /usr/local/bin/CuraEngine help >/tmp/cura_help.txt 2>&1 || { \
+    echo "CuraEngine failed to start"; \
+    cat /tmp/cura_help.txt; \
+    exit 1; \
+    }
 
 ############################
 #  Python 依赖
