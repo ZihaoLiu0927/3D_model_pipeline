@@ -162,6 +162,7 @@ def slice_model(
 
     cmd = [
         CURAENGINE_BIN, "slice", "-v",
+        "-d", str(pathlib.Path(CURAENGINE_DEFINITIONS_DIR).parent),
         "-j", str(fdmprinter_def),
         "-j", str(custom_def),
         "-l", str(model_path),
