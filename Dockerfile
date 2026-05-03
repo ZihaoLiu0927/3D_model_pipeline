@@ -78,14 +78,14 @@ RUN printf '%s\n' \
 RUN set -eux; \
     df -h /tmp /opt; \
     curl --fail --location --retry 5 --retry-delay 2 --show-error \
-        "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
-        --output /tmp/cura.AppImage; \
+    "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
+    --output /tmp/cura.AppImage; \
     ls -lh /tmp/cura.AppImage; \
     for OFFSET in $(LC_ALL=C grep -aob 'hsqs' /tmp/cura.AppImage | cut -d: -f1); do \
-        rm -rf /opt/cura; \
-        if unsquashfs -q -o "$OFFSET" -d /opt/cura /tmp/cura.AppImage; then \
-            break; \
-        fi; \
+    rm -rf /opt/cura; \
+    if unsquashfs -q -o "$OFFSET" -d /opt/cura /tmp/cura.AppImage; then \
+    break; \
+    fi; \
     done; \
     test -d /opt/cura; \
     CURA_DEFS="$(find /opt/cura -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname)"; \
@@ -99,36 +99,20 @@ RUN set -eux; \
 # that doesn't exist outside the AppImage runtime, causing "exec: not found" failures.
 RUN INTERP="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"; \
     find /opt/cura -type f -perm /111 | while read -r f; do \
-        if file "$f" 2>/dev/null | grep -q 'ELF.*dynamically linked'; then \
-            patchelf --set-interpreter "$INTERP" "$f" 2>/dev/null || true; \
-        fi; \
+    if file "$f" 2>/dev/null | grep -q 'ELF.*dynamically linked'; then \
+    patchelf --set-interpreter "$INTERP" "$f" 2>/dev/null || true; \
+    fi; \
     done
 
-# 【核心修改 2】：编写更稳健的 Wrapper 脚本，注入 AppImage 的标准库路径
 RUN set -eux; \
     CURA_BIN="$(find /opt/cura -name 'CuraEngine' -type f -perm /111 | sort | head -1)"; \
     test -n "$CURA_BIN"; \
-    if [ "$CURA_BIN" != "/opt/cura/CuraEngine" ]; then \
-        ln -sf "$CURA_BIN" /opt/cura/CuraEngine; \
-    fi; \
-    printf '%s\n' \
-        '#!/bin/sh' \
-        'set -eu' \
-        'CURA_LIB_PATHS="$(find /opt/cura -type f -name "*.so*" -printf "%h\n" | sort -u | tr "\n" ":")"' \
-        'export LD_LIBRARY_PATH="${CURA_LIB_PATHS}${LD_LIBRARY_PATH:-}"' \
-        'if [ -x /opt/cura/CuraEngine ]; then' \
-        '  exec /opt/cura/CuraEngine "$@"' \
-        'fi' \
-        'CURA_BIN="$(find /opt/cura -name CuraEngine -type f -perm /111 | sort | head -1)"' \
-        'if [ -z "$CURA_BIN" ]; then' \
-        '  echo "CuraEngine binary not found under /opt/cura" >&2' \
-        '  exit 127' \
-        'fi' \
-        'exec "$CURA_BIN" "$@"' \
-        > /usr/local/bin/CuraEngine; \
-    chmod +x /usr/local/bin/CuraEngine; \
-    test -x /usr/local/bin/CuraEngine; \
-    test -n "$(find /opt/cura -name 'libArcus.so*' -type f | head -1)"
+    echo "CuraEngine real bin: $CURA_BIN"; \
+    file "$CURA_BIN"; \
+    patchelf --print-interpreter "$CURA_BIN" || true; \
+    patchelf --set-interpreter /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 "$CURA_BIN"; \
+    patchelf --print-interpreter "$CURA_BIN"; \
+    ldd "$CURA_BIN" || true
 
 ############################
 #  Python 依赖
