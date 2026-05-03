@@ -20,7 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglu1-mesa libqt5widgets5 qtbase5-dev \
     libxrender1 libxrandr2 libxi6 libopengl0 \
-    libarchive-tools libfuse2 \
+    libarchive-tools libfuse2 squashfs-tools \
     build-essential gcc g++ make libeigen3-dev \
     curl wget git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -54,28 +54,48 @@ RUN curl -fSL \
 ############################
 #  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
 ############################
-RUN wget -q \
-    "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
-    -O /tmp/cura.AppImage \
-    && chmod +x /tmp/cura.AppImage \
-    && cd /tmp && ./cura.AppImage --appimage-extract > /dev/null \
-    # 【核心修改 1】：不要去猜测和挑选 .so 文件，直接保留完整的 AppImage 依赖环境
-    && mv /tmp/squashfs-root /opt/cura \
-    # 提取 definitions 目录
-    && CURA_DEFS=$(find /opt/cura -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname) \
-    && echo "Found definitions at: $CURA_DEFS" \
-    && mkdir -p /app/app/profiles/definitions \
-    && cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/ \
-    # 清理无用的 AppImage 文件释放空间
-    && rm -f /tmp/cura.AppImage
+RUN set -eux; \
+    wget -q \
+        "https://github.com/Ultimaker/Cura/releases/download/5.12.0/UltiMaker-Cura-5.12.0-linux-X64.AppImage" \
+        -O /tmp/cura.AppImage; \
+    for OFFSET in $(LC_ALL=C grep -aob 'hsqs' /tmp/cura.AppImage | cut -d: -f1); do \
+        rm -rf /opt/cura; \
+        if unsquashfs -q -o "$OFFSET" -d /opt/cura /tmp/cura.AppImage; then \
+            break; \
+        fi; \
+    done; \
+    test -d /opt/cura; \
+    CURA_DEFS="$(find /opt/cura -name 'fdmprinter.def.json' -type f | head -1 | xargs dirname)"; \
+    echo "Found definitions at: $CURA_DEFS"; \
+    mkdir -p /app/app/profiles/definitions; \
+    cp -r "$CURA_DEFS"/. /app/app/profiles/definitions/; \
+    rm -f /tmp/cura.AppImage
 
 # 【核心修改 2】：编写更稳健的 Wrapper 脚本，注入 AppImage 的标准库路径
-RUN CURA_BIN=$(find /opt/cura -name 'CuraEngine' -type f | head -1) \
-    && echo '#!/bin/sh' > /usr/local/bin/CuraEngine \
-    # 包含 AppImage 内置的各种 lib 路径（兼容 x86_64-linux-gnu）
-    && echo 'export LD_LIBRARY_PATH="/opt/cura/usr/lib:/opt/cura/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"' >> /usr/local/bin/CuraEngine \
-    && echo 'exec "'$CURA_BIN'" "$@"' >> /usr/local/bin/CuraEngine \
-    && chmod +x /usr/local/bin/CuraEngine
+RUN set -eux; \
+    CURA_BIN="$(find /opt/cura -name 'CuraEngine' -type f -perm /111 | sort | head -1)"; \
+    test -n "$CURA_BIN"; \
+    if [ "$CURA_BIN" != "/opt/cura/CuraEngine" ]; then \
+        ln -sf "$CURA_BIN" /opt/cura/CuraEngine; \
+    fi; \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+        'CURA_LIB_PATHS="$(find /opt/cura -type f -name "*.so*" -printf "%h\n" | sort -u | tr "\n" ":")"' \
+        'export LD_LIBRARY_PATH="${CURA_LIB_PATHS}${LD_LIBRARY_PATH:-}"' \
+        'if [ -x /opt/cura/CuraEngine ]; then' \
+        '  exec /opt/cura/CuraEngine "$@"' \
+        'fi' \
+        'CURA_BIN="$(find /opt/cura -name CuraEngine -type f -perm /111 | sort | head -1)"' \
+        'if [ -z "$CURA_BIN" ]; then' \
+        '  echo "CuraEngine binary not found under /opt/cura" >&2' \
+        '  exit 127' \
+        'fi' \
+        'exec "$CURA_BIN" "$@"' \
+        > /usr/local/bin/CuraEngine; \
+    chmod +x /usr/local/bin/CuraEngine; \
+    test -x /usr/local/bin/CuraEngine; \
+    test -n "$(find /opt/cura -name 'libArcus.so*' -type f | head -1)"
 
 ############################
 #  Python 依赖
