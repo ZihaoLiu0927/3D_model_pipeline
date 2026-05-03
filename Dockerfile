@@ -40,16 +40,35 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 ############################
-#  安装 Blender (headless)
+#  Blender 兼容入口
 ############################
-ARG BL_VER=4.1.1
-ARG BL_DIR=${BL_VER%.*}
-RUN curl -fSL \
-    https://download.blender.org/release/Blender${BL_DIR}/blender-${BL_VER}-linux-x64.tar.xz \
-    -o blender.tar.xz \
-    && tar -xJf blender.tar.xz -C /opt \
-    && ln -s /opt/blender-${BL_VER}-linux-x64/blender /usr/local/bin/blender \
-    && rm blender.tar.xz
+# requirements.txt 安装的 bpy wheel 已包含 headless Blender Python 运行时。
+# 这里保留 /usr/local/bin/blender 这个入口名，兼容现有代码里的
+# `blender -b -P app/validate.py -- model.stl` 调用，但不再解压完整 Blender 包。
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    'SCRIPT=""' \
+    'while [ "$#" -gt 0 ]; do' \
+    '  case "$1" in' \
+    '    -P)' \
+    '      shift' \
+    '      SCRIPT="$1"' \
+    '      ;;' \
+    '    --)' \
+    '      shift' \
+    '      break' \
+    '      ;;' \
+    '  esac' \
+    '  shift' \
+    'done' \
+    'if [ -z "$SCRIPT" ]; then' \
+    '  echo "Usage: blender -b -P script.py -- args..." >&2' \
+    '  exit 2' \
+    'fi' \
+    'exec python "$SCRIPT" -- "$@"' \
+    > /usr/local/bin/blender \
+    && chmod +x /usr/local/bin/blender
 
 ############################
 #  安装 CuraEngine 5.12.0（从官方 AppImage 提取）
