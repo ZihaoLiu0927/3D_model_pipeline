@@ -20,32 +20,31 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # 系统运行库 + 构建/解包工具
 ############################
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # common runtime
     ca-certificates \
     curl \
     wget \
     git \
     file \
     xz-utils \
-    # AppImage / squashfs
     libarchive-tools \
     libfuse2 \
     squashfs-tools \
-    # build tools used by Python deps / pymeshlab / trimesh stack
     build-essential \
     gcc \
     g++ \
     make \
     libeigen3-dev \
-    # ELF patch/debug
     patchelf \
-    # OpenGL / X / Qt-ish runtime libs sometimes needed by bpy/Cura extracted libs
     libgl1 \
     libglu1-mesa \
     libopengl0 \
     libxrender1 \
     libxrandr2 \
     libxi6 \
+    libxext6 \
+    libx11-6 \
+    libsm6 \
+    libice6 \
     libxkbcommon-x11-0 \
     libxcb-randr0 \
     libxcb-xinerama0 \
